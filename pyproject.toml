@@ -1,0 +1,24 @@
+[project]
+name = "smart-traffic-control"
+version = "0.1.0"
+description = "Vision-based smart traffic signal decision and simulation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+smart-traffic-control = "traffic_control:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/traffic_control"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

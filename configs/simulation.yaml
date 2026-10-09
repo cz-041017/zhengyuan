@@ -1,0 +1,39 @@
+project:
+  name: smart-traffic-control-simulation
+  config_version: 1
+
+runtime:
+  mode: simulation
+  observation_timeout_s: 3.0
+
+queue_estimation:
+  queue_speed_threshold_mps: 0.5
+  vehicle_length_m: 5.0
+  stopped_gap_m: 2.0
+  stale_after_s: 3.0
+
+optimization:
+  max_wait_target_s: 120.0
+  priorities:
+    - downstream_spillback_prevention
+    - main_road_green_wave
+    - demand_score
+
+simulation:
+  duration_s: 3600.0
+  step_s: 0.5
+  random_seed: 42
+
+signal:
+  phases: []
+  transitions:
+    yellow_s: null
+    all_red_s: null
+
+countdown:
+  display_duration_s: 15.0
+
+safety:
+  require_config_validation: true
+  reject_unknown_phases: true
+  reject_stale_observations: true
