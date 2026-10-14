@@ -1,10 +1,11 @@
-# zhengyuan —— 智能交通信号控制系统·逻辑决策层
+# zhengyuan —— 智能交通信号控制系统 · 逻辑决策层
 
 > 仓库地址：<https://github.com/cz-041017/zhengyuan>
 > 项目名（pyproject）：`smart-traffic-control`　版本：`0.1.0`
 > 语言 / 版本：Python ≥ 3.11（uv 管理依赖）
-> 状态：**早期原型 / 逻辑决策层骨架**　·　完整决策算法（P0–P3 评分 / 相位分组 / 最小最大绿 / 15 s 倒数）见 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)
-> 感知层接入见 [`docs/perception-interface.md`](docs/perception-interface.md)；可调参数见 [`docs/parameter-reference.md`](docs/parameter-reference.md)
+> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），100 个单元测试通过
+>
+> 文档索引：算法设计 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)　·　感知层接口 [`docs/perception-interface.md`](docs/perception-interface.md)　·　可调参数 [`docs/parameter-reference.md`](docs/parameter-reference.md)　·　调试与复现 [`docs/debugging-guide.md`](docs/debugging-guide.md)
 
 ---
 
@@ -12,268 +13,239 @@
 
 本项目是**智能交通信号控制系统（Intelligent Traffic Signal Control, ITSC）的逻辑决策层（Logic Decision Layer）**。
 
-它接收来自感知层的车辆检测观测数据（目标识别 + 边缘计算），经过**数据校验、状态估计、安全约束与优先级仲裁、相位状态机与配时控制**，输出**"建议的下一相位"（PhaseDecision）**，供控制接口层转发给执行层（PLC 或仿真器）。
+它接收感知层（YOLO11 视觉识别 + 边缘计算）的车辆检测结果，经过**数据校验 → 状态估计 → 安全约束与优先级仲裁 → 相位选择与配时控制**，输出**「建议的下一相位」`PhaseDecision`**，由控制接口层转发给执行层（PLC / 信号机 / 仿真器）。
 
-项目当前处于**决策层骨架阶段**：已实现数据模型、配置校验、排队估计、安全守卫四个核心模块；尚未实现真正的评分引擎与相位状态机（见「八、当前状态与路线图」）。
+**一句话**：把「路口各方向排队了多少车、等了多久、下游堵不堵」变成「下一个该放哪个相位、为什么」。
+
+> **分层边界**：决策层只输出**建议**，**不直接生成灯色指令**；真实灯色由信号机执行，并须回传可信反馈后才更新决策层内部状态。
 
 ---
 
-## 二、系统总体架构（四层）
+## 二、已实现的功能
 
-整个系统分为四层，本仓库属于**逻辑决策层**：
+### 2.1 相位建模与分组
+
+- **相位分组**（[`phasing.py`](src/traffic_control/phasing.py)）：按路口类型自动推导相位组
+  - **模式 A（全支路）**：每向「直行 + 左转」合并 → 4 组 `P_N / P_E / P_S / P_W`；
+  - **模式 B（有主路）**：主路双向直行 = 绿波组 `P_MT`，主路双向左转 = `P_ML`，两条支路各一组。
+- **规范流向 ID**：8 个（`north_through` / `north_left` / … / `west_left`）。
+- **冲突矩阵**：从审核配置加载，校验**对称性 / 无自冲突 / 无未知相位**，绝不从运动重叠推断。
+
+### 2.2 决策评分（P0–P3，语义优先级）
+
+| 优先级 | 语义 | 实现方式 |
+|---|---|---|
+| **P0** | 单方向等待 ≤ 120s | **硬抢占**：`W ≥ D − (剩余最小绿 + 黄灯 + 全红)` 时无条件调度，绕过评分与倒数 |
+| **P1** | 下游溢流保护 | **硬排除**下游拥堵方向 + 滞回解除（`o_high` / `o_low`）；未知数据按拥堵处理 |
+| **P2** | 主路绿波优先 | 主路直行在绿波窗口内 `+2.0`（可被 P0 覆盖） |
+| **P3** | 需求评分 | `0.6·车数归一 + 0.4·等待归一`，∈[0,1] |
+
+> 关键设计：**P0/P1 是硬约束，不是「把分数调大」**——否则一个过大的绿波权重就能淹没等待时限，造成红灯超时。
+
+### 2.3 相位状态机与配时
+
+- **最小绿**：硬下限，未满足**禁止切换**（含 P0 抢占也须等完）；
+- **最大绿**：硬上限，到达即**强制切换**；
+- **区间内**：候选分数 `> 当前 + 滞回` 且持续去抖 → 触发 **15s 倒数**；
+- **15s 倒数**：仅用于**分数驱动的可选切换**，倒数期间每 tick 复核、可取消；**P0 抢占与最大绿跳过倒数直接切换**（否则会突破 120s 或最大绿）。
+
+### 2.4 安全与降级
+
+- **安全守卫**（[`safety.py`](src/traffic_control/safety.py)）：最小绿、冲突、模式、未知相位检查；
+- **P0–P1 冲突上报**：截止方向又下游拥堵 → 判 `p0_p1_conflict`（`feasible=False`）上报仲裁，**不伪造高分强行放行**；
+- **数据新鲜度与故障降级**（[`degradation.py`](src/traffic_control/degradation.py)）：
+  - `NORMAL` 全新鲜 → 自适应；
+  - `PARTIAL` 部分过期 → 保守等待（自上次观测起算），仍经 P0 被服务；
+  - `FAILSAFE` 无新鲜数据 → 固定配时 / 黄闪，**绝不把「无数据」当作「没车」**；
+- **执行反馈（E 状态）**（[`feedback.py`](src/traffic_control/feedback.py)）：切换后须在确认超时内收到目标相位，**超时 / 控制器故障 / 相位错配 → 判执行失败**进故障流程。
+
+### 2.5 验证与工程化
+
+- **最坏情况时序分析**（[`timing_analysis.py`](src/traffic_control/timing_analysis.py)）：验证 120s 目标的**结构性可行性**（切换开销 vs 截止）+ 无抢占最坏等待 + preempt 负载标记；
+- **配置驱动**：全部参数集中在 YAML，加载时强校验（含部署模式：必须有审核相位与配时）；
+- **端到端装配**（[`runtime.py`](src/traffic_control/runtime.py)）：`build_runtime(config)` 一条调用产出 `Scorer` + `SpillbackMonitor` + `DegradationController` + `FeedbackMonitor` + `PhaseStateMachine`；
+- **感知层接口边界**（[`perception.py`](src/traffic_control/perception.py)）：类型化输入 + 非法车道 ID 快速失败；
+- **100 个单元测试**覆盖上述全部行为。
+
+---
+
+## 三、模块一览
+
+| 模块 | 职责 | 主要类型 / 函数 |
+|---|---|---|
+| [`models.py`](src/traffic_control/models.py) | 核心数据模型与枚举 | `SignalColor`、`ControllerMode`、`VehicleObservation`、`LaneState`、`SignalPhase`、`ControllerState`、`PhaseDecision` |
+| [`config_loader.py`](src/traffic_control/config_loader.py) | YAML 配置加载与强校验 | `load_config`、`validate_config`、`ConfigError` |
+| [`queue_estimator.py`](src/traffic_control/queue_estimator.py) | 逐车道排队需求估计 | `QueueEstimator` |
+| [`safety.py`](src/traffic_control/safety.py) | 仿真级安全守卫 | `SafetyGuard`、`SafetyCheck` |
+| [`phasing.py`](src/traffic_control/phasing.py) | 相位分组与冲突矩阵 | `PhaseGroup`、`phase_groups`、`ConflictMatrix` |
+| [`scoring.py`](src/traffic_control/scoring.py) | P0–P3 评分与溢流滞回 | `ScoreConfig`、`Scorer`、`SpillbackMonitor`、`aggregate_demand` |
+| [`state_machine.py`](src/traffic_control/state_machine.py) | 相位状态机（最小/最大绿、P0 抢占、15s 倒数） | `PhaseStateMachine`、`MachineConfig`、`PhaseDemand`、`MachineStage` |
+| [`degradation.py`](src/traffic_control/degradation.py) | 数据新鲜度与故障降级 | `DataFreshness`、`DegradationController`、`DegradationMode`、`conservative_oldest_wait` |
+| [`feedback.py`](src/traffic_control/feedback.py) | 执行反馈与故障回退（E 状态） | `FeedbackMonitor`、`FeedbackStatus` |
+| [`timing_analysis.py`](src/traffic_control/timing_analysis.py) | 最坏情况时序分析 | `analyze_timing`、`TimingAnalysis` |
+| [`perception.py`](src/traffic_control/perception.py) | 感知层输入边界 | `RawDetection`、`DownstreamReport`、`PerceptionFrame`、`normalize_detections`、`downstream_occupancy` |
+| [`runtime.py`](src/traffic_control/runtime.py) | 配置 → 运行时端到端装配 | `build_runtime`、`RuntimeObjects`、`build_phases` 等 |
+
+---
+
+## 四、系统总体架构（四层）
+
+本仓库属于其中的**逻辑决策层**：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  感知层 Perception                                            │
-│  · YOLO11 目标识别（停止线前车辆数、检测时间戳、置信度、车道归属）│
-│  · 边缘计算机（尚未选型）                                       │
+│  · YOLO11 目标识别（停止线前车辆数、车道归属、时间戳、速度）      │
+│  · 接口见 docs/perception-interface.md                        │
 └───────────────────────────┬─────────────────────────────────┘
-                            │ 观测数据 VehicleObservation
+                            │ VehicleObservation / DownstreamReport
 ┌───────────────────────────▼─────────────────────────────────┐
-│  逻辑决策层 Logic Decision  ◀──── 本项目（当前推进中）           │
-│  · 数据校验与状态估计（QueueEstimator）                         │
-│  · 安全约束与优先级仲裁（SafetyGuard + 评分引擎，待实现）         │
-│  · 相位状态机与配时控制（最小绿/最大绿/黄灯/全红，待实现）         │
-│  · 决策输出 PhaseDecision（仅建议，非直接灯色指令）               │
+│  逻辑决策层 Logic Decision  ◀──── 本项目                       │
+│  · 排队估计 QueueEstimator      · 评分 Scorer（P0–P3）          │
+│  · 相位分组/冲突矩阵 Phasing     · 状态机 PhaseStateMachine      │
+│  · 降级 DegradationController   · 反馈 FeedbackMonitor          │
+│  · 输出 PhaseDecision（仅建议，非灯色指令）                      │
 └───────────────────────────┬─────────────────────────────────┘
                             │ 相位建议 PhaseDecision
 ┌───────────────────────────▼─────────────────────────────────┐
-│  控制接口层 Control Interface（需后续跟进）                      │
-│  · 与信号控制机 / 上位机的通信协议对接（GB/T 20999 等）           │
+│  控制接口层 Control Interface（尚未实现）                       │
+│  · 与信号控制机 / 上位机通信（GB/T 20999 等）                    │
 └───────────────────────────┬─────────────────────────────────┘
-                            │ 控制指令 / 反馈
+                            │ 控制指令 / 执行反馈
 ┌───────────────────────────▼─────────────────────────────────┐
-│  执行层 Execution                                            │
-│  · PLC 或交通信号仿真器                                        │
+│  执行层 Execution（尚未实现）                                   │
+│  · PLC / 交通信号仿真器                                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-> **分层边界要点**：决策层只输出"建议的下一相位"，**不直接生成灯色指令**；控制接口层负责把建议转换为信号机可执行的指令，并回传实际灯色反馈与异常状态。
-
 ---
 
-## 三、核心设计原则（贯穿全文）
-
-1. **Score 无直接灯色权限**：`score` 只负责在**已通过安全约束筛选的可选相位集合**内优化排序，**不能单独决定改变灯色**。
-2. **先安全后优化**：冲突互锁、切换时序、信号机允许执行、下游条件满足，是选择候选相位的前置硬约束（`F(t)` 集合）；评分只在 `F(t)` 内进行。
-3. **配时参数必须可追溯**：最小绿、最大绿、黄灯、全红、15 秒切换倒数等，必须来自**经审核的路口配置**与信号机规则，不得在运行时由 score 临时生成，也不得把未经核验的配时自称为国标规定值。
-4. **运行时状态权威**：切换完成后，必须收到**可信的信号机执行反馈**才更新实际相位；执行失败进入故障处理流程，而非直接更新软件内部状态。
-
----
-
-## 四、目录结构
+## 五、目录结构
 
 ```
 zhengyuan/
 ├── configs/
-│   ├── default.yaml          # 默认配置（simulation 模式，相位为空）
-│   └── simulation.yaml       # 仿真配置（含仿真时长/步长/随机种子）
+│   ├── default.yaml                 # 模式 A（全支路）示例配置
+│   └── simulation.yaml              # 模式 B（主路 NS + 绿波）示例配置
+├── docs/
+│   ├── decision-algorithm-design.md # 完整算法设计与安全基线（权威）
+│   ├── perception-interface.md      # 感知层（YOLO11）接入接口文档
+│   ├── parameter-reference.md       # 可调参数手册（调参）
+│   └── debugging-guide.md           # 调试与复现手册
 ├── src/traffic_control/
-│   ├── __init__.py
-│   ├── models.py             # 核心数据模型与枚举
-│   ├── config_loader.py      # YAML 配置加载与校验
-│   ├── queue_estimator.py    # 排队需求估计器（逐车道）
-│   └── safety.py             # 安全守卫（相位切换基本逻辑约束）
-├── tests/
-│   ├── test_config_loader.py # 配置校验测试
-│   └── test_safety.py        # 安全守卫测试
+│   ├── __init__.py                  # CLI 占位入口 main()
+│   ├── models.py                    # 数据模型与枚举
+│   ├── config_loader.py             # 配置加载与校验
+│   ├── queue_estimator.py           # 逐车道排队估计
+│   ├── safety.py                    # 安全守卫
+│   ├── phasing.py                   # 相位分组与冲突矩阵
+│   ├── scoring.py                   # P0–P3 评分
+│   ├── state_machine.py             # 相位状态机
+│   ├── degradation.py               # 数据新鲜度与故障降级
+│   ├── feedback.py                  # 执行反馈（E 状态）
+│   ├── timing_analysis.py           # 最坏情况时序分析
+│   ├── perception.py                # 感知层接口边界
+│   └── runtime.py                   # 配置 → 运行时装配
+├── tests/                           # 10 个测试文件 / 100 个用例
 ├── .gitignore
-├── .python-version
-├── pyproject.toml            # 打包/脚本/依赖（pyyaml, dev: pytest）
-├── uv.lock
-└── README.md                 # （当前为空，可迁移本介绍）
+├── .python-version                  # 3.11
+├── pyproject.toml                   # 依赖：pyyaml；dev：pytest
+├── uv.lock                          # 依赖锁定
+└── README.md
 ```
 
 ---
 
-## 五、核心模块说明
+## 六、快速开始（复现）
 
-### 5.1 `models.py` —— 数据模型与枚举
+前置：已安装 [uv](https://docs.astral.sh/uv/)（uv 会自动装 Python 3.11 与依赖）。
 
-定义了决策层内部流转的核心数据结构：
+```bash
+git clone https://github.com/cz-041017/zhengyuan.git
+cd zhengyuan
+uv sync                                       # 按 uv.lock 创建 .venv 并安装依赖
+uv run pytest                                 # 期望：100 passed
+uv run smart-traffic-control                  # 入口自检：打印 decision engine ready
+```
 
-| 名称 | 说明 |
-|---|---|
-| `SignalColor` | 灯色枚举：`RED` / `YELLOW` / `GREEN` |
-| `ControllerMode` | 控制机模式：`NORMAL` / `CLEARANCE`（清空）/ `ALL_RED`（全红）/ `FAULT`（故障） |
-| `VehicleObservation` | 感知层输入的车辆观测：`track_id`、`lane_id`、`observed_at`、`speed_mps`（含基础取值校验） |
-| `LaneState` | 单车道状态：车辆数、排队长度（m）、最老等待时间、下游是否拥堵、更新时间 |
-| `SignalPhase` | 信号相位：`phase_id`、`movement_ids`（可同时放行且通过冲突校核的交通流集合）、`min_green_s`、`max_green_s`、`yellow_s`、`all_red_s` |
-| `ControllerState` | 控制机当前逻辑状态：模式、当前相位、相位开始时间、灯色映射 |
-| `PhaseDecision` | 决策层输出：**建议**的下一相位（非灯色指令），含 reason、scores、constraints_applied、feasible |
+跑一次决策（伪代码，完整示例见[调试手册](docs/debugging-guide.md)）：
 
-> 关键设计：`PhaseDecision` 的注释明确标注为 "The decision layer's proposed next phase, not a direct light command"，即决策层产出的是**建议而非指令**。
-> `SignalPhase` 通过 `movement_ids` 区分"交通方向"与"信号相位"——一个相位是"一组能同时放行且已通过冲突校核的交通流"，而非单一方向。
+```python
+from traffic_control.config_loader import load_config
+from traffic_control.runtime import build_runtime
+from traffic_control.models import ControllerMode, ControllerState
+from traffic_control.state_machine import PhaseDemand
 
-### 5.2 `config_loader.py` —— 配置加载与校验
+runtime = build_runtime(load_config("configs/simulation.yaml"))
+state = ControllerState(mode=ControllerMode.NORMAL, current_phase_id="P_MT", phase_started_at=0.0)
+demands = {
+    "P_MT": PhaseDemand(green_wave_active=True),
+    "P_W":  PhaseDemand(vehicle_count=6, oldest_wait_s=118.0),   # 接近 120s
+}
+print(runtime.state_machine.tick(state, 12.0, demands).selected_phase_id)   # -> P_W（P0 抢占）
+```
 
-- 加载 YAML 配置并做基础结构校验，缺段或参数非法抛 `ConfigError`。
-- 必需的配置段：`project`、`runtime`、`queue_estimation`、`optimization`、`signal`、`countdown`、`safety`。
-- `runtime.mode` 仅允许 `simulation` 或 `deployment`。
-- **部署模式强约束**：`deployment` 模式下，要求已配置相位定义、且黄灯/全红时间已审核（非空）；否则拒绝加载。
-- 黄灯/全红为 `null` 表示**尚未审核**，不会静默变成 0。
-- `optimization.priorities` 要求按固定顺序列出：
-  1. `downstream_spillback_prevention`（下游溢流保护）
-  2. `main_road_green_wave`（主路绿波协调）
-  3. `demand_score`（需求评分）
-
-### 5.3 `queue_estimator.py` —— 排队需求估计器
-
-将感知层车辆跟踪观测转换为**逐车道状态**（`LaneState`）：
-
-- **等待时间代理**：以车辆 `first_seen_at`（首次观测时间）作为等待时间代理，且**保留最早首次观测时间**，不会被新来车辆重置（呼应"最老未放行车辆等待时间"的设计）。
-- **排队判断**：仅对 `speed_mps <= queue_speed_threshold_mps`（默认 0.5 m/s）的车辆计入排队长度；无速度测量时不假设其已停止（排队长度视为未知）。
-- **排队长度估算**：`排队长度 = 排队车辆数 × (车长 + 停车间距)`（默认车长 5.0 m、间距 2.0 m）。
-- **过期清理**：超过 `stale_after_s`（默认 3 s）未更新的轨迹被移除，避免陈旧数据污染。
-- **下游拥堵标记**：支持传入 `downstream_blocked_lanes`，在 `LaneState.downstream_blocked` 中反映。
-
-> 说明：代码注释明确提醒，`first_seen_at` 只是等待时间的代理估计，**不能替代对车辆是否真正停车的检测**——这是当前实现与设计目标之间已知的差距。
-
-### 5.4 `safety.py` —— 安全守卫
-
-`SafetyGuard.check_candidate()` 对候选相位做**基本逻辑安全约束**检查，返回 `SafetyCheck(allowed, reasons)`：
-
-- 时间非法（`now < 0`、相位开始时间在未来）；
-- 未知候选相位 / 未知当前相位；
-- 控制机处于 `FAULT` / `CLEARANCE` / `ALL_RED` 模式时禁止切换；
-- **未满足当前相位最小绿时间**（`elapsed < current.min_green_s`）；
-- 候选相位与当前相位**冲突**（`candidate_conflicts_with_current_phase`）。
-
-> **重要边界**：代码注释明确声明——这是**仿真级安全守卫，不是经认证的信号控制机**，也不能替代当地/司法辖区的具体要求。真正的冲突判断、相位转换时序、允许的控制方式，必须来自**已核验的路口配置与信号机规则**。
+> 环境准备、复现各类行为、常见故障排查，见 **[docs/debugging-guide.md](docs/debugging-guide.md)**。
 
 ---
 
-## 六、决策流程设计（设计意图，已形式化）
+## 七、核心设计原则
 
-以下为项目拟采用的决策架构。**具体的 score 公式、相位分组、最小/最大绿、15 s 倒数状态机与安全红线，
-已形式化到 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)**；本节保留语义概览与设计意图：
-
-### 6.1 决策顺序（先约束，后优化）
-
-```
-1. 排除不满足冲突安全、相位转换、信号机约束的候选（F(t) 筛选）
-2. 识别等待时限风险：优先处理剩余等待预算最小的可服务方向（P0）
-3. 在约束允许前提下实施下游拥堵保护（P1）
-4. 剩余可选方案中，优先主路绿波协调（P2）
-5. 最后比较排队需求、等待压力、通行效率的综合 score（P3）
-```
-
-### 6.2 可服务相位集合 `F(t)`
-
-$$
-\mathcal{F}(t)=\{p\in\mathcal{P}:\ \text{冲突互锁有效 ∧ 切换时序有效 ∧ 信号机允许执行 ∧ 下游条件满足相应规则}\}
-$$
-
-评分只在 `F(t)` 内进行，**不能让一个很大的权重抵消硬约束**。
-
-### 6.3 归一化评分模型（第一版研究方案）
-
-$$
-S_p = w_q Q_p + w_w W_p + w_g G_p - w_b B_p
-$$
-
-| 项 | 含义 |
-|---|---|
-| `Q_p` | 相位对应排队需求指标 |
-| `W_p` | 等待压力指标 |
-| `G_p` | 主路绿波协调奖励 |
-| `B_p` | 下游拥堵惩罚指标 |
-| `w_q, w_w, w_g, w_b` | 需通过仿真/历史数据/灵敏度分析标定的权重 |
-
-> 所有输入应先归一化到统一范围（如 `[0,1]`）。权重目前**没有足够依据赋具体数值**，不能仅凭经验赋值就声称算法可靠。尤其是：**不能用一个很大的 `G_p` 抵消等待时限约束，也不能用一个很大的 `Q_p` 抵消下游安全约束**。
-
-### 6.4 P0–P3 语义（而非固定大分值）
-
-| 优先级 | 语义 | 关键要点 |
-|---|---|---|
-| **P0 等待时间保护** | 目标 120 s | 使用**最老未放行车辆等待时间** `W_i`；剩余时间预算 `B_i = D − W_i − Tᵢᶜˡᵉᵃʳ − Tᵢˢᵉʳᵛᵉ`；`B_i` 趋近 0 时触发紧急调度；预算不足时进入预定义约束处理路径，而非继续比 score |
-| **P1 下游溢流保护** | 避免向上游已堵路段送车 | 采用滞回控制（`O_i ≥ O_high` 进入拥堵 / `O_i ≤ O_low` 解除，`O_low < O_high`）；拥堵方向标记 `DOWNSTREAM_BLOCKED`，由相位可行性判断决定是否放行；**数据过期/中断时不得把"无返回"当作"下游畅通"**；需解除条件与异常告警防锁死 |
-| **P2 主路绿波协调** | 协调偏好 | 仅当主路直行相位处于计划绿波窗口、且安全条件允许时给奖励，**不拥有无条件通行权**；接近等待时限或错过窗口时应重算 |
-| **P3 需求评分** | 常规优化 | 输入不应只有车辆数，还应含排队车辆、等待趋势、置信度与数据新鲜度、通行能力与消散时间、下游剩余储车空间、当前相位持续时间 |
-
-> **P0 与 P1 冲突**：放行会把车辆送入已无空间的路段时，不能仅靠优先级数字自动放行，需进入专门的安全仲裁；若无安全可行动作，应**报告不可行状态**，而不是伪造一个更高的 score。
-
-### 6.5 相位状态机（建议 A–E 五态）
-
-| 状态 | 说明 |
-|---|---|
-| **A 绿灯运行** | 当前相位持续放行，记录绿灯开始时间、最小绿/最大绿，持续更新等待风险与交通状态 |
-| **B 切换请求评估** | 新相位 score 更高时只生成**切换请求**；未达最小绿不得仅因 score 高而切换；已达最大绿则执行预定义合法转换策略 |
-| **C 15 秒倒数** | 明确是"请求倒计时"还是"绿灯剩余时间"；倒计时期间持续复核条件，不假设结束时新相位必然安全可用 |
-| **D 安全转换** | 当前绿灯结束后执行黄灯与全红安全间隔，随后才允许合法下一相位放行（时间来自审核路口配置） |
-| **E 新相位确认** | 必须收到可信的信号机执行反馈才算切换完成；执行失败进入故障处理流程 |
-
-> **最大绿与 P0 协调**：最大绿限制当前相位持续时间，P0 限制方向等待风险，二者不能只靠一个 if 解决。建议通过仿真验证：
-> $$T_{\text{当前相位剩余}} + T_{\text{必要切换}} + T_{\text{目标相位可用}} \le D - W_i$$
-> 若该条件经常不成立，说明相位配置/切换策略/120 s 目标存在**结构性冲突**，不能靠调大 P0 权重解决。
+1. **score 无灯色权限**：评分只在**已通过安全约束筛选的可行相位集合 `F(t)`** 内排序，不能单独决定改灯。
+2. **先安全后优化**：冲突互锁、切换时序、信号机允许执行、下游条件满足是前置硬约束；评分只在 `F(t)` 内进行。
+3. **配时参数必须可追溯**：最小绿/最大绿/黄灯/全红/15s 倒数必须来自**经审核的路口配置**，不在运行时临时生成，也不把未经核验的配时称为国标规定值。
+4. **执行反馈是状态权威**：无反馈不更新相位；执行失败进故障流程。
+5. **数据缺失 ≠ 空 / 畅通**：观测超时或下游无返回按「未知」处理并降级，绝不当作「没车」或「畅通」。
 
 ---
 
-## 七、涉及标准（接口与验收依据）
+## 八、涉及标准（接口与验收依据）
 
-以下标准应作为**接口设计、设备行为、验收测试**的依据，而非简单化为算法权重。正式开发前须取得适用版本全文，并由交通信号控制专业人员确认具体条款、冲突相位表、黄灯与全红时间、故障行为与信号机接口。
+正式开发前须取得适用版本全文，并由交通信号控制专业人员确认具体条款、冲突相位表、黄灯与全红时间、故障行为与信号机接口。
 
 | 标准 | 内容与关注点 | 状态备注 |
 |---|---|---|
 | **GB 25280-2016** | 信号控制机的安全、控制功能与设备要求（强制性国标） | 强制标准 |
 | **GB/T 20999-2017** | 信号控制机与上位机之间的数据通信协议 | 现行 |
 | **GA/T 508-2014** | 道路交通信号倒计时显示器相关要求 | 现行 |
-| **T/BJITS 01-2025** | 应进一步核验全文、正式名称、发布状态及适用范围，再确定边缘设备接口 | 待核验 |
-| **GA/T 1049.2-2024** | 公安交通集成指挥平台与交通信号控制系统的通信协议（2025-01-01 实施） | 已实施 |
-| **T/CITSA 36-2023** | 路侧边缘计算单元与交通信号控制机的数据通信规范（信号状态、边缘单元通信、相位切换、秒级控制） | 参考接口 |
+| **T/BJITS 01-2025** | 边缘计算单元与信号控制机之间的通信要求 | 待核验全文 |
+| **GA/T 1049.2-2024** | 公安交通集成指挥平台与交通信号控制系统的通信协议 | 已实施 |
+| **T/CITSA 36-2023** | 路侧边缘计算单元与交通信号控制机的数据通信规范 | 参考接口 |
 
-> 本项目不会把未经全文核验的标准条款或自拟配时参数说成"国家标准规定值"。
+> 本项目不会把未经全文核验的标准条款或自拟配时参数说成「国家标准规定值」。
 
 ---
 
-## 八、当前状态与路线图
+## 九、当前状态与路线图
 
-### 已实现（当前骨架）
+### 已实现
 
 - [x] 核心数据模型与枚举（`models.py`）
-- [x] YAML 配置加载与校验，含部署模式强约束（`config_loader.py`）
-- [x] 逐车道排队需求估计，含等待时间代理、过期清理、下游拥堵标记（`queue_estimator.py`）
-- [x] 仿真级安全守卫：最小绿、冲突、模式、未知相位检查（`safety.py`）
-- [x] 评分引擎：P0–P3 score、P0 硬抢占、P1 下游溢流滞回（`scoring.py`）
-- [x] 相位分组与冲突矩阵结构：模式 A/B 分组 + 对称冲突表校验（`phasing.py`）
-- [x] 相位状态机：最小/最大绿、P0 硬抢占、15 s 倒数（分数驱动切换）（`state_machine.py`）
-- [x] 配置扩展校验与运行时构建器：评分参数、布局、冲突矩阵、绿波交叉校验（`config_loader.py` / `runtime.py`）
-- [x] 相位配时接入配置 + 端到端装配（`build_phases` / `build_runtime` → `Scorer`+`SpillbackMonitor`+`PhaseStateMachine`）
-- [x] 故障降级与数据新鲜度处理：NORMAL/PARTIAL/FAILSAFE + 保守等待（`degradation.py`）
-- [x] 最坏情况时序分析：切换开销 vs 截止 + 无抢占最坏等待 + preempt 负载标记（`timing_analysis.py`）
-- [x] 信号机执行反馈与故障回退（E 状态）：确认超时/故障/相位错配 → 故障（`feedback.py`）
-- [x] 配置样例（`default.yaml` / `simulation.yaml`）
-- [x] 配置与安全守卫的单元测试（`tests/`）
-- [x] 打包与脚本入口（`pyproject.toml`，CLI：`smart-traffic-control`）
+- [x] YAML 配置加载与强校验，含部署模式约束（`config_loader.py`）
+- [x] 逐车道排队需求估计（`queue_estimator.py`）
+- [x] 仿真级安全守卫（`safety.py`）
+- [x] 相位分组与冲突矩阵（`phasing.py`）
+- [x] P0–P3 评分引擎与下游溢流滞回（`scoring.py`）
+- [x] 相位状态机：最小/最大绿、P0 硬抢占、15s 倒数（`state_machine.py`）
+- [x] 数据新鲜度与故障降级（`degradation.py`）
+- [x] 执行反馈与故障回退（`feedback.py`）
+- [x] 最坏情况时序分析（`timing_analysis.py`）
+- [x] 感知层接口边界与文档（`perception.py`）
+- [x] 配置 → 运行时端到端装配（`runtime.py`）
+- [x] 100 个单元测试 + CLI 入口
 
 ### 尚未实现（下一阶段）
 
+- [ ] **仿真台**：控制器执行模型（按时间推进相位/清空）+ 车流到达模型 + 主循环与指标统计
 - [ ] 控制接口层对接（GB/T 20999 等通信协议）
-- [ ] 仿真器 / PLC 执行层接入
+- [ ] PLC / 交通信号仿真器执行层接入
 
 ---
 
-## 九、运行与测试
+## 十、重要安全声明
 
-```bash
-# 安装依赖（uv）
-uv sync
-
-# 运行测试
-uv run pytest
-
-# 打包 / 安装 CLI
-uv build
-uv run smart-traffic-control --help   # 占位入口，待实现
-```
-
----
-
-## 十、关键设计约束（防呆清单）
-
-- **score 无灯色权限**，只在安全可选相位集合内优化排序。
-- **不可用固定大权重**表达 P0–P3；硬约束、抑制条件、协调偏好、需求评分四类语义分离。
-- **配时参数必须来自审核配置**，部署模式强制校验。
-- **执行反馈才是状态权威**，无反馈不更新相位，失败进故障流程。
-- **不把"无下游返回"当作"下游畅通"**。
-- **权重未标定前**，不宣称算法可靠；120 s 目标须经可行性验证而非直接声称可保证。
+> 本项目是**研究 / 原型阶段的决策层软件**，**不是经认证的信号控制机**，不能替代当地/司法辖区的具体要求。
+>
+> - 代码中所有 score 初值、权重、配时参数均为**待标定值**，**未经仿真标定、最坏情况验证与真机联调前，不得部署到真实路口**；
+> - 真正的冲突判断、相位转换时序、允许的控制方式，必须来自**已核验的路口配置与信号机规则**；
+> - 涉及交通安全的改动须由交通信号控制专业人员评审。
