@@ -38,6 +38,7 @@ def validate_config(config: dict[str, Any]) -> None:
         "queue_estimation",
         "optimization",
         "signal",
+        "green_wave",
         "countdown",
         "safety",
     )
@@ -65,6 +66,10 @@ def validate_config(config: dict[str, Any]) -> None:
         runtime.get("observation_timeout_s"),
         "runtime.observation_timeout_s",
     )
+    _require_positive_number(
+        runtime.get("confirm_timeout_s"),
+        "runtime.confirm_timeout_s",
+    )
 
     queue = config["queue_estimation"]
     _require_non_negative_number(
@@ -89,9 +94,82 @@ def validate_config(config: dict[str, Any]) -> None:
         optimization.get("max_wait_target_s"),
         "optimization.max_wait_target_s",
     )
+    _require_positive_number(
+        optimization.get("wait_urgency_max_score"),
+        "optimization.wait_urgency_max_score",
+    )
+    _require_non_negative_number(
+        optimization.get("green_wave_score"),
+        "optimization.green_wave_score",
+    )
+    _require_non_negative_number(
+        optimization.get("score_hysteresis"),
+        "optimization.score_hysteresis",
+    )
+    _require_non_negative_number(
+        optimization.get("switch_debounce_s"),
+        "optimization.switch_debounce_s",
+    )
+
+    wait_start = optimization.get("wait_urgency_start_s")
+    if (
+        isinstance(wait_start, bool)
+        or not isinstance(wait_start, (int, float))
+        or wait_start < 0
+        or wait_start >= optimization["max_wait_target_s"]
+    ):
+        raise ConfigError(
+            "optimization.wait_urgency_start_s must be within "
+            "[0, max_wait_target_s)"
+        )
+
+    demand = optimization.get("demand")
+    if not isinstance(demand, dict):
+        raise ConfigError("optimization.demand must be a mapping")
+    for weight in ("vehicle_weight", "wait_weight"):
+        value = demand.get(weight)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0 <= value <= 1
+        ):
+            raise ConfigError(
+                f"optimization.demand.{weight} must be within [0, 1]"
+            )
+    if (
+        demand.get("vehicle_weight", 0) + demand.get("wait_weight", 0)
+    ) <= 0:
+        raise ConfigError("optimization.demand weights must sum positively")
+    _require_positive_number(
+        demand.get("n_max"), "optimization.demand.n_max"
+    )
+
+    spillback = optimization.get("spillback")
+    if not isinstance(spillback, dict):
+        raise ConfigError("optimization.spillback must be a mapping")
+    o_high = spillback.get("o_high")
+    o_low = spillback.get("o_low")
+    if (
+        isinstance(o_low, bool)
+        or isinstance(o_high, bool)
+        or not isinstance(o_low, (int, float))
+        or not isinstance(o_high, (int, float))
+        or not 0 <= o_low < o_high
+    ):
+        raise ConfigError(
+            "optimization.spillback must satisfy 0 <= o_low < o_high"
+        )
+    penalty = spillback.get("penalty")
+    if (
+        isinstance(penalty, bool)
+        or not isinstance(penalty, (int, float))
+        or penalty >= 0
+    ):
+        raise ConfigError("optimization.spillback.penalty must be negative")
 
     priorities = optimization.get("priorities")
     expected_priorities = [
+        "wait_time_guarantee",
         "downstream_spillback_prevention",
         "main_road_green_wave",
         "demand_score",
@@ -109,37 +187,22 @@ def validate_config(config: dict[str, Any]) -> None:
     )
 
     signal = config["signal"]
+    _validate_layout(signal)
+    _validate_conflict_matrix(signal)
+
     phases = signal.get("phases")
     if not isinstance(phases, list):
         raise ConfigError("signal.phases must be a list")
 
-    transitions = signal.get("transitions")
-    if not isinstance(transitions, dict):
-        raise ConfigError("signal.transitions must be a mapping")
+    _validate_phases(phases)
 
-    yellow_s = transitions.get("yellow_s")
-    all_red_s = transitions.get("all_red_s")
-
-    # None means that timing has not yet been reviewed.
-    # A missing or unreviewed timing must not silently become zero.
-    if yellow_s is not None:
-        _require_positive_number(yellow_s, "signal.transitions.yellow_s")
-
-    if all_red_s is not None:
-        _require_non_negative_number(
-            all_red_s,
-            "signal.transitions.all_red_s",
+    if runtime["mode"] == "deployment" and not phases:
+        raise ConfigError(
+            "Deployment mode requires reviewed signal phase definitions"
         )
 
-    if runtime["mode"] == "deployment":
-        if not phases:
-            raise ConfigError(
-                "Deployment mode requires reviewed signal phase definitions"
-            )
-        if yellow_s is None or all_red_s is None:
-            raise ConfigError(
-                "Deployment mode requires reviewed transition timings"
-            )
+    _validate_green_wave(config["green_wave"])
+
     safety = config["safety"]
     safety_flags = (
         "require_config_validation",
@@ -150,6 +213,113 @@ def validate_config(config: dict[str, Any]) -> None:
     for flag in safety_flags:
         if not isinstance(safety.get(flag), bool):
             raise ConfigError(f"safety.{flag} must be a boolean")
+
+def _validate_layout(signal: dict[str, Any]) -> None:
+    layout = signal.get("layout")
+    if not isinstance(layout, dict):
+        raise ConfigError("signal.layout must be a mapping")
+    if layout.get("mode") not in {"minor_only", "main_road"}:
+        raise ConfigError("signal.layout.mode must be minor_only or main_road")
+    if layout.get("mode") == "main_road" and layout.get(
+        "main_road_direction"
+    ) not in {"NS", "EW"}:
+        raise ConfigError(
+            "signal.layout.main_road_direction must be NS or EW "
+            "in main_road mode"
+        )
+
+
+def _validate_conflict_matrix(signal: dict[str, Any]) -> None:
+    matrix = signal.get("conflict_matrix")
+    if not isinstance(matrix, dict):
+        raise ConfigError("signal.conflict_matrix must be a mapping")
+
+    for phase_id, others in matrix.items():
+        if not isinstance(phase_id, str) or not phase_id.strip():
+            raise ConfigError(
+                "signal.conflict_matrix keys must be non-empty strings"
+            )
+        if not isinstance(others, list):
+            raise ConfigError("signal.conflict_matrix values must be lists")
+
+    for phase_id, others in matrix.items():
+        if phase_id in others:
+            raise ConfigError(
+                f"signal.conflict_matrix: phase {phase_id!r} "
+                "conflicts with itself"
+            )
+        for other in others:
+            if other not in matrix:
+                raise ConfigError(
+                    f"signal.conflict_matrix references unknown phase {other!r}"
+                )
+            if phase_id not in matrix[other]:
+                raise ConfigError(
+                    f"signal.conflict_matrix is not symmetric: "
+                    f"{phase_id!r} -> {other!r}"
+                )
+
+
+def _validate_phases(phases: list[Any]) -> None:
+    for item in phases:
+        if not isinstance(item, dict):
+            raise ConfigError("signal.phases entries must be mappings")
+        phase_id = item.get("phase_id")
+        if not isinstance(phase_id, str) or not phase_id.strip():
+            raise ConfigError(
+                "signal.phases[].phase_id must be a non-empty string"
+            )
+        movement_ids = item.get("movement_ids")
+        if not isinstance(movement_ids, list) or not movement_ids:
+            raise ConfigError(
+                "signal.phases[].movement_ids must be a non-empty list"
+            )
+        for movement_id in movement_ids:
+            if not isinstance(movement_id, str) or not movement_id.strip():
+                raise ConfigError(
+                    "signal.phases[].movement_ids entries must be "
+                    "non-empty strings"
+                )
+        _require_non_negative_number(
+            item.get("min_green_s"), "signal.phases[].min_green_s"
+        )
+        _require_positive_number(
+            item.get("max_green_s"), "signal.phases[].max_green_s"
+        )
+        if item.get("min_green_s") > item.get("max_green_s"):
+            raise ConfigError(
+                "signal.phases[].min_green_s cannot exceed max_green_s"
+            )
+        _require_non_negative_number(
+            item.get("yellow_s"), "signal.phases[].yellow_s"
+        )
+        _require_non_negative_number(
+            item.get("all_red_s", 0.0), "signal.phases[].all_red_s"
+        )
+
+
+def _validate_green_wave(green_wave: dict[str, Any]) -> None:
+    if not isinstance(green_wave.get("enabled"), bool):
+        raise ConfigError("green_wave.enabled must be a boolean")
+    if green_wave["enabled"]:
+        main_phase = green_wave.get("main_through_phase")
+        if not isinstance(main_phase, str) or not main_phase.strip():
+            raise ConfigError(
+                "green_wave.main_through_phase must be a non-empty string "
+                "when enabled"
+            )
+    _require_non_negative_number(
+        green_wave.get("band_start_s"), "green_wave.band_start_s"
+    )
+    _require_positive_number(
+        green_wave.get("band_end_s"), "green_wave.band_end_s"
+    )
+    if green_wave.get("band_start_s") >= green_wave.get("band_end_s"):
+        raise ConfigError("green_wave.band_start_s must be less than band_end_s")
+    _require_positive_number(
+        green_wave.get("period_s"), "green_wave.period_s"
+    )
+
 
 def _require_positive_number(value: Any, field_name: str) -> None:
     if (

@@ -3,7 +3,8 @@
 > 仓库地址：<https://github.com/cz-041017/zhengyuan>
 > 项目名（pyproject）：`smart-traffic-control`　版本：`0.1.0`
 > 语言 / 版本：Python ≥ 3.11（uv 管理依赖）
-> 状态：**早期原型 / 逻辑决策层骨架**
+> 状态：**早期原型 / 逻辑决策层骨架**　·　完整决策算法（P0–P3 评分 / 相位分组 / 最小最大绿 / 15 s 倒数）见 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)
+> 感知层接入见 [`docs/perception-interface.md`](docs/perception-interface.md)；可调参数见 [`docs/parameter-reference.md`](docs/parameter-reference.md)
 
 ---
 
@@ -142,9 +143,10 @@ zhengyuan/
 
 ---
 
-## 六、决策流程设计（设计意图，待落地）
+## 六、决策流程设计（设计意图，已形式化）
 
-以下为项目拟采用的决策架构，当前代码尚未完整实现，作为**设计与路线图**记录：
+以下为项目拟采用的决策架构。**具体的 score 公式、相位分组、最小/最大绿、15 s 倒数状态机与安全红线，
+已形式化到 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)**；本节保留语义概览与设计意图：
 
 ### 6.1 决策顺序（先约束，后优化）
 
@@ -232,20 +234,22 @@ $$
 - [x] YAML 配置加载与校验，含部署模式强约束（`config_loader.py`）
 - [x] 逐车道排队需求估计，含等待时间代理、过期清理、下游拥堵标记（`queue_estimator.py`）
 - [x] 仿真级安全守卫：最小绿、冲突、模式、未知相位检查（`safety.py`）
+- [x] 评分引擎：P0–P3 score、P0 硬抢占、P1 下游溢流滞回（`scoring.py`）
+- [x] 相位分组与冲突矩阵结构：模式 A/B 分组 + 对称冲突表校验（`phasing.py`）
+- [x] 相位状态机：最小/最大绿、P0 硬抢占、15 s 倒数（分数驱动切换）（`state_machine.py`）
+- [x] 配置扩展校验与运行时构建器：评分参数、布局、冲突矩阵、绿波交叉校验（`config_loader.py` / `runtime.py`）
+- [x] 相位配时接入配置 + 端到端装配（`build_phases` / `build_runtime` → `Scorer`+`SpillbackMonitor`+`PhaseStateMachine`）
+- [x] 故障降级与数据新鲜度处理：NORMAL/PARTIAL/FAILSAFE + 保守等待（`degradation.py`）
+- [x] 最坏情况时序分析：切换开销 vs 截止 + 无抢占最坏等待 + preempt 负载标记（`timing_analysis.py`）
+- [x] 信号机执行反馈与故障回退（E 状态）：确认超时/故障/相位错配 → 故障（`feedback.py`）
 - [x] 配置样例（`default.yaml` / `simulation.yaml`）
 - [x] 配置与安全守卫的单元测试（`tests/`）
 - [x] 打包与脚本入口（`pyproject.toml`，CLI：`smart-traffic-control`）
 
 ### 尚未实现（下一阶段）
 
-- [ ] 归一化评分引擎（P0–P3 综合 score）
-- [ ] 相位状态机与配时控制（最小绿/最大绿/15 s 切换/黄灯/全红）
-- [ ] 冲突相位表与切换时序（来自已核验路口配置）
-- [ ] 下游溢流滞回控制与 `DOWNSTREAM_BLOCKED` 仲裁
-- [ ] 信号机执行反馈与故障回退
 - [ ] 控制接口层对接（GB/T 20999 等通信协议）
 - [ ] 仿真器 / PLC 执行层接入
-- [ ] 最坏情况时序分析，验证 120 s 等待目标的可行性
 
 ---
 

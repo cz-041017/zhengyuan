@@ -46,27 +46,37 @@ def test_rejects_boolean_as_numeric_parameter() -> None:
         validate_config(config)
 
 
-def test_rejects_deployment_without_reviewed_signal_timings() -> None:
+def test_rejects_deployment_without_reviewed_phase_definitions() -> None:
     config = load_config(DEFAULT_CONFIG)
     config["runtime"]["mode"] = "deployment"
-    config["signal"]["phases"] = [
-        {
-            "phase_id": "NS",
-            "movement_ids": ["north_south"],
-        }
-    ]
+    config["signal"]["phases"] = []
 
-    with pytest.raises(ConfigError, match="transition timings"):
+    with pytest.raises(ConfigError, match="reviewed signal phase definitions"):
         validate_config(config)
 
 
-def test_simulation_allows_unreviewed_signal_timings() -> None:
+def test_simulation_allows_empty_phases() -> None:
     config = load_config(DEFAULT_CONFIG)
-
-    config["signal"]["transitions"]["yellow_s"] = None
-    config["signal"]["transitions"]["all_red_s"] = None
+    config["signal"]["phases"] = []
 
     validate_config(config)
+
+
+def test_rejects_phase_min_green_exceeding_max() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["signal"]["phases"] = [
+        {
+            "phase_id": "P_N",
+            "movement_ids": ["north_through", "north_left"],
+            "min_green_s": 70,
+            "max_green_s": 60,
+            "yellow_s": 3,
+            "all_red_s": 1,
+        }
+    ]
+
+    with pytest.raises(ConfigError, match="min_green_s"):
+        validate_config(config)
 
 def test_rejects_invalid_safety_flag() -> None:
     config = load_config(DEFAULT_CONFIG)
@@ -81,4 +91,88 @@ def test_rejects_invalid_config_version() -> None:
     config["project"]["config_version"] = 0
 
     with pytest.raises(ConfigError, match="config_version"):
+        validate_config(config)
+
+
+def test_rejects_invalid_layout_mode() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["signal"]["layout"]["mode"] = "ring"
+
+    with pytest.raises(ConfigError, match="layout.mode"):
+        validate_config(config)
+
+
+def test_rejects_main_road_without_direction() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["signal"]["layout"]["mode"] = "main_road"
+    config["signal"]["layout"]["main_road_direction"] = None
+
+    with pytest.raises(ConfigError, match="main_road_direction"):
+        validate_config(config)
+
+
+def test_rejects_asymmetric_conflict_matrix() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["signal"]["conflict_matrix"]["P_W"] = []
+
+    with pytest.raises(ConfigError, match="not symmetric"):
+        validate_config(config)
+
+
+def test_rejects_self_conflict_in_matrix() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["signal"]["conflict_matrix"]["P_N"] = ["P_N"]
+
+    with pytest.raises(ConfigError, match="conflicts with itself"):
+        validate_config(config)
+
+
+def test_rejects_unknown_conflict_phase() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["signal"]["conflict_matrix"]["P_N"] = ["P_X"]
+
+    with pytest.raises(ConfigError, match="unknown phase"):
+        validate_config(config)
+
+
+def test_rejects_wrong_priority_order() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["optimization"]["priorities"] = list(
+        reversed(config["optimization"]["priorities"])
+    )
+
+    with pytest.raises(ConfigError, match="priorities"):
+        validate_config(config)
+
+
+def test_rejects_invalid_spillback_thresholds() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["optimization"]["spillback"]["o_low"] = 0.9
+
+    with pytest.raises(ConfigError, match="spillback"):
+        validate_config(config)
+
+
+def test_rejects_invalid_demand_weight() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["optimization"]["demand"]["vehicle_weight"] = 1.5
+
+    with pytest.raises(ConfigError, match="vehicle_weight"):
+        validate_config(config)
+
+
+def test_rejects_invalid_green_wave_band() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["green_wave"]["band_start_s"] = 50.0
+
+    with pytest.raises(ConfigError, match="band_start_s"):
+        validate_config(config)
+
+
+def test_rejects_enabled_green_wave_without_phase() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["green_wave"]["enabled"] = True
+    config["green_wave"]["main_through_phase"] = None
+
+    with pytest.raises(ConfigError, match="main_through_phase"):
         validate_config(config)
