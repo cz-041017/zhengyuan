@@ -41,7 +41,7 @@ uv sync
 
 ```powershell
 uv run pytest -q
-# 期望输出：100 passed
+# 期望输出：120 passed
 
 uv run python --version
 # 期望：Python 3.11.x
@@ -56,37 +56,54 @@ uv run smart-traffic-control
 
 ## 2. 跑一次决策（最小示例）
 
+推荐用门面 `DecisionLayer`：内部串起 排队估计 → 新鲜度/降级 → 保守等待 → 溢流滞回 → 状态机 → 执行反馈。
+
+```python
+from traffic_control.decision_layer import DecisionLayer
+from traffic_control.models import ControllerMode, ControllerState, VehicleObservation
+
+layer = DecisionLayer.from_yaml("configs/simulation.yaml")
+
+# 全部可调参数一次取全
+p = layer.parameters
+print(p.max_wait_target_s, p.observation_timeout_s, p.score.green_wave_score)
+
+state = ControllerState(mode=ControllerMode.NORMAL, current_phase_id="P_MT", phase_started_at=0.0)
+observations = [
+    VehicleObservation(track_id=1, lane_id="west_through", observed_at=0.0, speed_mps=0.0),
+]
+
+result = layer.tick(
+    now=120.0,
+    state=state,
+    observations=observations,
+    downstream_occupancy={"east_through": 0.9},   # None 表示未知，按拥堵处理
+)
+
+print("下一步相位：", result.decision.selected_phase_id)
+print("原因：", result.decision.reason)
+print("各相位得分：", result.decision.scores)
+print("应用的约束：", result.decision.constraints_applied)
+print("降级模式：", result.degradation)
+print("执行反馈：", result.feedback)
+```
+
+只想验证单个部件时，走底层 API：
+
 ```python
 from traffic_control.config_loader import load_config
 from traffic_control.runtime import build_runtime
-from traffic_control.models import ControllerMode, ControllerState
 from traffic_control.state_machine import PhaseDemand
 
-# 1) 加载配置并装配决策层
 runtime = build_runtime(load_config("configs/simulation.yaml"))
-
-# 2) 当前控制器状态（真实部署时来自信号机反馈）
-state = ControllerState(
-    mode=ControllerMode.NORMAL,
-    current_phase_id="P_MT",
-    phase_started_at=0.0,
+decision = runtime.state_machine.tick(
+    state,
+    12.0,
+    {
+        "P_MT": PhaseDemand(green_wave_active=True),
+        "P_W": PhaseDemand(vehicle_count=6, oldest_wait_s=118.0),
+    },
 )
-
-# 3) 各相位的聚合需求（真实部署时由感知数据聚合而来）
-demands = {
-    "P_MT": PhaseDemand(green_wave_active=True),
-    "P_ML": PhaseDemand(vehicle_count=3, oldest_wait_s=20.0),
-    "P_E":  PhaseDemand(vehicle_count=5, oldest_wait_s=40.0),
-    "P_W":  PhaseDemand(vehicle_count=6, oldest_wait_s=118.0),
-}
-
-# 4) 决策
-decision = runtime.state_machine.tick(state, 12.0, demands)
-print("下一步相位：", decision.selected_phase_id)
-print("原因：", decision.reason)
-print("各相位得分：", decision.scores)
-print("应用的约束：", decision.constraints_applied)
-print("可行：", decision.feasible)
 ```
 
 `decision.reason` 是**排查问题的第一入口**，常见取值：
@@ -132,13 +149,22 @@ uv run pytest tests/test_state_machine.py::test_p0_preempt_switches_immediately 
 | 120s 可行性/最坏等待 | `uv run pytest tests/test_timing_analysis.py -v` | `timing_analysis.py` |
 | 感知层输入校验 | `uv run pytest tests/test_perception.py -v` | `perception.py` |
 | 端到端装配 + 决策 | `uv run pytest tests/test_runtime.py -v` | `runtime.py` |
+| **决策层门面（推荐入口）** | `uv run pytest tests/test_decision_layer.py -v` | `decision_layer.py` |
+| 反馈超时（同一目标重复提议） | `uv run pytest tests/test_feedback.py -v -k reproposed` | `feedback.py` |
+| 重复相位被拒 | `uv run pytest tests/test_config_loader.py -v -k duplicate` | `config_loader.py` |
+| 优先级护栏（调反被拒） | `uv run pytest tests/test_scoring.py -v -k outranking` | `scoring.py` |
+| 不可行配时告警 | `uv run pytest tests/test_runtime.py -v -k infeasible` | `runtime.py` |
 
 ---
 
 ## 4. 调参与验证
 
 1. **改参数**：编辑 [`configs/`](../configs/) 下的 YAML（参数含义与建议见[参数手册](parameter-reference.md)）；
-2. **改完立即验证**：`uv run pytest -q`（配置校验会拦住非法值，例如优先级顺序、`o_low ≥ o_high`、`min_green > max_green`）；
+2. **改完立即验证**：`uv run pytest -q`。配置校验会拦住非法值，例如：
+   - 优先级顺序被调反（`green_wave_score` 不大于需求权重和等）→ `ConfigError`
+   - 重复的 `phase_id` → `ConfigError`
+   - `o_low ≥ o_high`、`min_green > max_green`
+   - 结构不可行的配时（min 绿 + 清空 ≥ 120s）→ 装配时 `UserWarning`
 3. **检查 120s 是否结构可行**：
 
 ```python

@@ -5,7 +5,7 @@ import pytest
 from traffic_control.config_loader import load_config
 from traffic_control.degradation import DegradationMode
 from traffic_control.feedback import FeedbackStatus
-from traffic_control.models import ControllerMode, ControllerState
+from traffic_control.models import ControllerMode, ControllerState, PhaseDecision
 from traffic_control.timing_analysis import analyze_timing
 from traffic_control.runtime import (
     build_conflict_matrix,
@@ -166,8 +166,6 @@ def test_runtime_timing_analysis_feasible() -> None:
 
 
 def test_runtime_includes_feedback_monitor() -> None:
-    from traffic_control.models import PhaseDecision
-
     runtime = build_runtime(load_config(DEFAULT))
 
     state = ControllerState(
@@ -179,3 +177,62 @@ def test_runtime_includes_feedback_monitor() -> None:
 
     status = runtime.feedback_monitor.observe(decision, state, 0.0)
     assert status == FeedbackStatus.PENDING
+
+
+MINOR_ONLY_MOVEMENTS = {
+    "P_N": ["north_through", "north_left"],
+    "P_E": ["east_through", "east_left"],
+    "P_S": ["south_through", "south_left"],
+    "P_W": ["west_through", "west_left"],
+}
+
+
+def _phases_with(min_green: float, max_green: float) -> list[dict]:
+    return [
+        {
+            "phase_id": phase_id,
+            "movement_ids": movements,
+            "min_green_s": min_green,
+            "max_green_s": max_green,
+            "yellow_s": 3,
+            "all_red_s": 1,
+        }
+        for phase_id, movements in MINOR_ONLY_MOVEMENTS.items()
+    ]
+
+
+def test_build_phases_rejects_duplicate_phase_id() -> None:
+    config = load_config(DEFAULT)
+    config["signal"]["phases"] = _phases_with(10, 60)
+    # Same id twice, contradictory timings: must not silently pick the last.
+    config["signal"]["phases"].append(
+        {
+            "phase_id": "P_N",
+            "movement_ids": ["north_through", "north_left"],
+            "min_green_s": 99,
+            "max_green_s": 99,
+            "yellow_s": 9,
+            "all_red_s": 9,
+        }
+    )
+
+    with pytest.raises(ValueError, match="duplicate phase definition"):
+        build_runtime(config)
+
+
+def test_build_runtime_warns_on_infeasible_timing() -> None:
+    config = load_config(DEFAULT)
+    config["signal"]["phases"] = _phases_with(130, 130)
+
+    with pytest.warns(UserWarning, match="infeasible"):
+        build_runtime(config)
+
+
+def test_build_runtime_does_not_warn_on_feasible_timing() -> None:
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        build_runtime(load_config(DEFAULT))
+
+    assert not [w for w in caught if "infeasible" in str(w.message)]

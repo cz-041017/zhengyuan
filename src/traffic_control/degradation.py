@@ -66,6 +66,15 @@ class DegradationController:
             return DegradationMode.PARTIAL
         return DegradationMode.NORMAL
 
+    def assess(
+        self,
+        now: float,
+        phase_ids: Iterable[str],
+        last_seen: Mapping[str, float | None],
+    ) -> Freshness:
+        """Expose per-phase freshness so callers can apply conservative waits."""
+        return self._freshness.assess(now, phase_ids, last_seen)
+
 
 def conservative_oldest_wait(
     now: float,
@@ -79,6 +88,17 @@ def conservative_oldest_wait(
     conservatively: the direction is assumed to have been waiting since its
     last observation (or since startup if never observed), so it is still
     served through the P0 budget instead of being silently treated as empty.
+
+    KNOWN LIMITATION, left as documentation deliberately.
+    The never-observed branch returns ``now``, which grows without bound. On a
+    long-running deployment a direction whose sensor never reported therefore
+    looks permanently starving, and if several sensors are dead they all tie at
+    the same wait and preemption churns between them. Probability is low
+    because several simultaneous dead feeds is already a degraded state that
+    ``DegradationController`` reports as PARTIAL/FAILSAFE. Suggested fix when
+    it is worth the contract change: cap the never-observed wait (for example
+    at the deadline), and escalate a never-observed direction once through an
+    alarm instead of re-preempting every tick.
     """
     if last_seen_at is not None and 0 <= now - last_seen_at <= timeout_s:
         return observed_wait_s

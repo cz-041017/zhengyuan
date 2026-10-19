@@ -48,6 +48,27 @@ class ScoreConfig:
         if not (0 <= self.o_low < self.o_high):
             raise ValueError("o_low must satisfy 0 <= o_low < o_high")
 
+        # Priority guardrails: the score tiers must stay ordered P0 > P1 > P2 >
+        # P3 for EVERY input, not just for the defaults. Without these, tuning
+        # could silently let demand outrank the green wave, or a green wave
+        # outrank the wait urgency, breaking the documented precedence.
+        demand_ceiling = self.demand_vehicle_weight + self.demand_wait_weight
+        if self.green_wave_score > 0 and self.green_wave_score <= demand_ceiling:
+            raise ValueError(
+                "green_wave_score must exceed demand_vehicle_weight + "
+                "demand_wait_weight so P2 outranks P3"
+            )
+        if self.wait_urgency_max_score <= self.green_wave_score:
+            raise ValueError(
+                "wait_urgency_max_score must exceed green_wave_score "
+                "so P0 urgency outranks P2"
+            )
+        if abs(self.spillback_penalty) <= self.wait_urgency_max_score:
+            raise ValueError(
+                "spillback_penalty magnitude must exceed "
+                "wait_urgency_max_score so P1 outranks everything else"
+            )
+
 
 def aggregate_demand(
     vehicle_counts: Iterable[int], oldest_waits_s: Iterable[float]

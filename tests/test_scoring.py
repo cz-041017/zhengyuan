@@ -122,3 +122,35 @@ def test_spillback_unknown_occupancy_treated_as_blocked() -> None:
 def test_spillback_rejects_invalid_thresholds() -> None:
     with pytest.raises(ValueError, match="o_low"):
         SpillbackMonitor(o_high=0.5, o_low=0.6)
+
+
+# -- priority guardrails ----------------------------------------------------
+# These keep the documented P0 > P1 > P2 > P3 precedence from being broken by
+# a legal-looking weight combination.
+
+
+def test_rejects_green_wave_not_outranking_demand() -> None:
+    with pytest.raises(ValueError, match="P2 outranks P3"):
+        ScoreConfig(
+            demand_vehicle_weight=1.0,
+            demand_wait_weight=1.0,
+            green_wave_score=0.5,
+        )
+
+
+def test_rejects_wait_urgency_not_outranking_green_wave() -> None:
+    with pytest.raises(ValueError, match="P0 urgency outranks P2"):
+        ScoreConfig(wait_urgency_max_score=1.0, green_wave_score=2.0)
+
+
+def test_rejects_spillback_not_dominating_everything() -> None:
+    with pytest.raises(ValueError, match="P1 outranks everything"):
+        ScoreConfig(spillback_penalty=-3.0, wait_urgency_max_score=5.0)
+
+
+def test_green_wave_disabled_allows_zero_bonus() -> None:
+    # green_wave_score == 0 means the green-wave tier is off, so the P2 > P3
+    # rule does not apply; the other two guardrails still hold.
+    cfg = ScoreConfig(green_wave_score=0.0)
+
+    assert cfg.green_wave_score == 0.0

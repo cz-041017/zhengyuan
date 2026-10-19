@@ -35,7 +35,11 @@ def make_machine() -> PhaseStateMachine:
     return PhaseStateMachine(make_phases(), Scorer(ScoreConfig()))
 
 
-def make_state(phase_id: str, started_at: float, mode=ControllerMode.NORMAL):
+def make_state(
+    phase_id: str,
+    started_at: float,
+    mode: ControllerMode = ControllerMode.NORMAL,
+) -> ControllerState:
     return ControllerState(
         mode=mode, current_phase_id=phase_id, phase_started_at=started_at
     )

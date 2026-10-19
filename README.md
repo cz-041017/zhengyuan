@@ -3,7 +3,7 @@
 > 仓库地址：<https://github.com/cz-041017/zhengyuan>
 > 项目名（pyproject）：`smart-traffic-control`　版本：`0.1.0`
 > 语言 / 版本：Python ≥ 3.11（uv 管理依赖）
-> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），100 个单元测试通过
+> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），120 个单元测试通过
 >
 > 文档索引：算法设计 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)　·　感知层接口 [`docs/perception-interface.md`](docs/perception-interface.md)　·　可调参数 [`docs/parameter-reference.md`](docs/parameter-reference.md)　·　调试与复现 [`docs/debugging-guide.md`](docs/debugging-guide.md)
 
@@ -65,7 +65,7 @@
 - **配置驱动**：全部参数集中在 YAML，加载时强校验（含部署模式：必须有审核相位与配时）；
 - **端到端装配**（[`runtime.py`](src/traffic_control/runtime.py)）：`build_runtime(config)` 一条调用产出 `Scorer` + `SpillbackMonitor` + `DegradationController` + `FeedbackMonitor` + `PhaseStateMachine`；
 - **感知层接口边界**（[`perception.py`](src/traffic_control/perception.py)）：类型化输入 + 非法车道 ID 快速失败；
-- **100 个单元测试**覆盖上述全部行为。
+- **120 个单元测试**覆盖上述全部行为。
 
 ---
 
@@ -145,12 +145,14 @@ zhengyuan/
 │   ├── feedback.py                  # 执行反馈（E 状态）
 │   ├── timing_analysis.py           # 最坏情况时序分析
 │   ├── perception.py                # 感知层接口边界
-│   └── runtime.py                   # 配置 → 运行时装配
-├── tests/                           # 10 个测试文件 / 100 个用例
+│   ├── runtime.py                   # 配置 → 运行时装配
+│   └── decision_layer.py            # 决策层门面（一键调用 + 参数汇总）
+├── tests/                           # 11 个测试文件 / 120 个用例
 ├── .gitignore
 ├── .python-version                  # 3.11
 ├── pyproject.toml                   # 依赖：pyyaml；dev：pytest
 ├── uv.lock                          # 依赖锁定
+├── AGENTS.md                        # 协作代理 / 同事使用的最小工作规程
 └── README.md
 ```
 
@@ -164,26 +166,39 @@ zhengyuan/
 git clone https://github.com/cz-041017/zhengyuan.git
 cd zhengyuan
 uv sync                                       # 按 uv.lock 创建 .venv 并安装依赖
-uv run pytest                                 # 期望：100 passed
+uv run pytest                                 # 期望：120 passed
 uv run smart-traffic-control                  # 入口自检：打印 decision engine ready
 ```
 
-跑一次决策（伪代码，完整示例见[调试手册](docs/debugging-guide.md)）：
+把决策层当成一个随时可用的逻辑包（完整示例见[调试手册](docs/debugging-guide.md)）：
 
 ```python
-from traffic_control.config_loader import load_config
-from traffic_control.runtime import build_runtime
-from traffic_control.models import ControllerMode, ControllerState
-from traffic_control.state_machine import PhaseDemand
+from traffic_control.decision_layer import DecisionLayer
+from traffic_control.models import ControllerMode, ControllerState, VehicleObservation
 
-runtime = build_runtime(load_config("configs/simulation.yaml"))
+# 一次装配：内部串起 排队估计 → 新鲜度/降级 → 保守等待 → 溢流滞回 → 状态机 → 执行反馈
+layer = DecisionLayer.from_yaml("configs/simulation.yaml")
+
+p = layer.parameters   # 全部可调参数一次取全（p.score / p.machine / 超时 / 排队参数）
+
 state = ControllerState(mode=ControllerMode.NORMAL, current_phase_id="P_MT", phase_started_at=0.0)
-demands = {
-    "P_MT": PhaseDemand(green_wave_active=True),
-    "P_W":  PhaseDemand(vehicle_count=6, oldest_wait_s=118.0),   # 接近 120s
-}
-print(runtime.state_machine.tick(state, 12.0, demands).selected_phase_id)   # -> P_W（P0 抢占）
+observations = [
+    VehicleObservation(track_id=1, lane_id="west_through", observed_at=0.0, speed_mps=0.0),
+]
+
+result = layer.tick(
+    now=120.0,
+    state=state,
+    observations=observations,
+    downstream_occupancy={"east_through": 0.9},   # None 表示未知，按拥堵处理
+)
+
+result.decision.selected_phase_id   # 建议的下一相位
+result.decision.reason              # 排查入口，如 p0_wait_preempt
+result.degradation, result.feedback # 调用方据此决定降级 / 故障
 ```
+
+> 也支持底层分部件调用（`build_runtime` + `state_machine.tick`），用于单元级验证。
 
 > 环境准备、复现各类行为、常见故障排查，见 **[docs/debugging-guide.md](docs/debugging-guide.md)**。
 
@@ -232,7 +247,17 @@ print(runtime.state_machine.tick(state, 12.0, demands).selected_phase_id)   # ->
 - [x] 最坏情况时序分析（`timing_analysis.py`）
 - [x] 感知层接口边界与文档（`perception.py`）
 - [x] 配置 → 运行时端到端装配（`runtime.py`）
-- [x] 100 个单元测试 + CLI 入口
+- [x] 决策层门面：一键调用 + 可调参数汇总（`decision_layer.py`）
+- [x] 优先级次序不等式护栏：加载期强制 P0>P1>P2>P3（`scoring.py` / `config_loader.py`）
+- [x] 重复相位检测、不可行配时告警
+- [x] 120 个单元测试 + CLI 入口
+
+### 已知限制（代码处留有修改建议注释）
+
+- [ ] 最大绿到期且所有后继被下游拥堵排除时，返回「保持」会让绿灯越过硬上限
+- [ ] 从未观测方向的保守等待等于 `now`，多个传感器同时失效时会并列抢占
+- [ ] 冲突矩阵已加载但未参与候选筛选（4 相环全互斥，互斥由清空时序保证）
+- [ ] 绿波窗口未计算，`green_wave_active` 由调用方提供
 
 ### 尚未实现（下一阶段）
 

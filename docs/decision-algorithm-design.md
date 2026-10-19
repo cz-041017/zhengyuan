@@ -165,6 +165,10 @@ S(p) = S_demand(p) + S_gw(p) + S_wait(p) + S_spill(p)
 | 到 120s 截止 vs 一切 | 强制抢占 | 硬抢占，不经评分 |
 
 > 初值仅供仿真起步，必须通过灵敏度分析与真机数据标定；任何改动不得破坏上述相对次序。
+>
+> **次序由代码强制**：`ScoreConfig` 构造时校验 `green_wave_score > 需求权重和`、
+> `wait_urgency_max_score > green_wave_score`、`|spillback_penalty| > wait_urgency_max_score`，
+> 违反即以 `ConfigError` 拒绝加载（默认值已满足）。因此调参无法把 P2/P3 次序调反。
 
 ---
 
@@ -290,17 +294,32 @@ optimization:
     - demand_score                        # P3
 ```
 
-### 10.2 待实现模块
+### 10.2 模块状态
 
-- [x] 评分引擎（`scoring.py`）：实现 §4 的 S(p) 各评分项（P0 硬抢占由状态机负责）
+已实现（均为 `DecisionLayer` 的可用部件）：
+
+- [x] 评分引擎（`scoring.py`）：§4 的 S(p) 各评分项；**优先级次序由不等式守卫在加载期强制**
 - [x] 相位分组与冲突矩阵（`phasing.py`）：模式 A/B、对称冲突表校验
 - [x] 下游溢流滞回（P1）`SpillbackMonitor`（未知观测按拥堵处理）
 - [x] 相位状态机（`state_machine.py`）：最小/最大绿 + P0 硬抢占（含剩余最小绿预算）+ 15s 倒数（分数驱动切换）
-- [x] 配置扩展校验（`config_loader.py`）与运行时构建器（`runtime.py`）：评分/状态机参数、布局、冲突矩阵、绿波交叉校验
-- [x] 相位配时接入配置并装配完整 `PhaseStateMachine`（`build_phases` + `build_runtime` 端到端装配）
-- [x] 故障降级与数据新鲜度处理（`degradation.py`：fresh/stale 判定 + NORMAL/PARTIAL/FAILSAFE + 保守等待）
-- [x] 信号机执行反馈与故障回退（`feedback.py`：`FeedbackMonitor`，超时/控制器故障/相位错配 → 故障）
-- [x] 最坏情况时序分析（`timing_analysis.py`：切换开销 vs 截止、无抢占最坏等待、preempt 负载标记）
+- [x] 配置扩展校验（`config_loader.py`）与运行时构建器（`runtime.py`）：参数/布局/冲突矩阵/绿波交叉校验、重复相位检测、不可行配时告警
+- [x] 相位配时接入配置并装配完整 `PhaseStateMachine`
+- [x] 数据新鲜度与故障降级（`degradation.py`）：fresh/stale、NORMAL/PARTIAL/FAILSAFE、过期方向保守等待
+- [x] 执行反馈（`feedback.py`）：确认超时 / 控制器故障 / 相位错配 → FAILURE
+- [x] 最坏情况时序分析（`timing_analysis.py`）
+- [x] **决策层门面**（`decision_layer.py`）：`DecisionLayer.tick()` 一次串联排队估计→新鲜度→保守等待→溢流滞回→状态机→执行反馈；`TunableParameters` 汇总全部可调参数
+
+由调用方 / 执行层负责，本层只给出信号：
+
+- FAILSAFE → 固定配时 / 黄闪：`LayerResult.degradation` 给出信号，切换动作属执行层
+- FAILURE → 控制器置 FAULT：`LayerResult.feedback` 给出信号
+
+已知限制（代码处留有修改建议注释，暂不改动）：
+
+- [ ] 最大绿到期且所有后继被下游拥堵排除时，返回「保持」会让绿灯越过硬上限（`state_machine.py` → `no_feasible_successor`）
+- [ ] 从未观测的方向保守等待等于 `now`，多个传感器同时失效时会并列抢占（`conservative_oldest_wait`）
+- [ ] 冲突矩阵已加载但未参与候选筛选；4 相环全互斥时，互斥由清空时序保证
+- [ ] 绿波窗口未计算，`green_wave_active` 由调用方提供
 
 ---
 
