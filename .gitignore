@@ -38,3 +38,5 @@ sumo/network/
 sumo/demand/
 sumo/results/
 *.log
+routes.rou*.xml
+*.rou.alt.xml
