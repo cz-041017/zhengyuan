@@ -167,6 +167,27 @@ def test_countdown_cancelled_when_score_drops() -> None:
     assert machine.stage == MachineStage.GREEN
 
 
+def test_p0_p1_conflict_clears_countdown() -> None:
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    high = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=60.0)}
+
+    machine.tick(state, 20.0, high)  # debouncing
+    machine.tick(state, 23.0, high)  # countdown_started
+    assert machine.stage == MachineStage.COUNTDOWN
+
+    # A blocked direction whose wait hits the deadline triggers P0/P1 conflict.
+    conflict = {
+        "NS": PhaseDemand(),
+        "EW": PhaseDemand(oldest_wait_s=200.0, downstream_blocked=True),
+    }
+    decision = machine.tick(state, 30.0, conflict)
+    assert decision.reason == "p0_p1_conflict"
+
+    # The in-progress countdown must be cleared, not survive the conflict.
+    assert machine.stage == MachineStage.GREEN
+
+
 def test_current_downstream_blocked_switches_away() -> None:
     machine = make_machine()
     state = make_state("NS", 0.0)

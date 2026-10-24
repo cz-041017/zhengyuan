@@ -27,3 +27,14 @@ htmlcov/
 # OS-generated files
 .DS_Store
 Thumbs.db
+
+# SUMO 仿真产物（可再生，不入库）
+panan/results/
+panan/demand/
+panan/network/*.osm*
+panan/network/panan_placeholder.net.xml
+panan/network/panan.poly.xml.gz
+sumo/network/
+sumo/demand/
+sumo/results/
+*.log

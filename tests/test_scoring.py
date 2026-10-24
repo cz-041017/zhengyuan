@@ -112,6 +112,15 @@ def test_spillback_hysteresis() -> None:
     assert monitor.is_blocked("E") is False
 
 
+def test_spillback_first_low_occupancy_is_unblocked() -> None:
+    monitor = SpillbackMonitor(o_high=0.8, o_low=0.5)
+
+    # A direction first observed below o_high must be reported unblocked,
+    # not raise KeyError (regression).
+    assert monitor.update("E", 0.4) is False
+    assert monitor.is_blocked("E") is False
+
+
 def test_spillback_unknown_occupancy_treated_as_blocked() -> None:
     monitor = SpillbackMonitor(o_high=0.8, o_low=0.5)
 

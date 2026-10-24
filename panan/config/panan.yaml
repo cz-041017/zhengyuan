@@ -1,0 +1,59 @@
+project:
+  name: panan-traffic-signal-simulation
+  config_version: 1
+
+runtime:
+  mode: simulation
+  observation_timeout_s: 3.0
+  confirm_timeout_s: 10.0
+
+queue_estimation:
+  queue_speed_threshold_mps: 0.5
+  vehicle_length_m: 5.0
+  stopped_gap_m: 2.0
+  stale_after_s: 3.0
+
+optimization:
+  max_wait_target_s: 120.0
+  wait_urgency_start_s: 80.0
+  wait_urgency_max_score: 5.0
+  green_wave_score: 2.0
+  demand:
+    vehicle_weight: 0.6
+    wait_weight: 0.4
+    n_max: 20.0
+  spillback:
+    o_high: 0.8
+    o_low: 0.5
+    penalty: -1000.0
+  score_hysteresis: 0.1
+  switch_debounce_s: 3.0
+  priorities:
+    - wait_time_guarantee
+    - downstream_spillback_prevention
+    - main_road_green_wave
+    - demand_score
+
+# 注意：真实/通用路网的路口拓扑（3岔/4岔）由接口层 panan_bridge 动态生成相位，
+# 这里 signal.* 仅用于满足配置校验，实际相位与冲突矩阵在桥接层按路口动态构建。
+signal:
+  layout:
+    mode: minor_only
+    main_road_direction: null
+  conflict_matrix: {}
+  phases: []
+
+green_wave:
+  enabled: false
+  main_through_phase: null
+  band_start_s: 0.0
+  band_end_s: 45.0
+  period_s: 120.0
+
+countdown:
+  display_duration_s: 15.0
+
+safety:
+  require_config_validation: true
+  reject_unknown_phases: true
+  reject_stale_observations: true

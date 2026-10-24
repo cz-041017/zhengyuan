@@ -155,11 +155,12 @@ class SpillbackMonitor:
         if was_blocked:
             if occupancy <= self._o_low:
                 self._blocked[direction_id] = False
-        else:
-            if occupancy >= self._o_high:
-                self._blocked[direction_id] = True
+        elif occupancy >= self._o_high:
+            self._blocked[direction_id] = True
 
-        return self._blocked[direction_id]
+        # A direction first seen below o_high is unblocked; it was never
+        # inserted, so fall back to False instead of raising KeyError.
+        return self._blocked.get(direction_id, False)
 
     def is_blocked(self, direction_id: str) -> bool:
         return self._blocked.get(direction_id, False)

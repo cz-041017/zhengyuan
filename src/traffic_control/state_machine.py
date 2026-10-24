@@ -168,6 +168,9 @@ class PhaseStateMachine:
         if blocked_deadline:
             # P0 and P1 conflict: the starving direction cannot be served
             # without pushing vehicles into a congested downstream link.
+            # Clear any in-progress countdown/debounce: the conflict changed
+            # the feasible set, so a stale pending switch must not survive.
+            self._clear_transient()
             return PhaseDecision(
                 None,
                 "p0_p1_conflict",
