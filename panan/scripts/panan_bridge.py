@@ -86,15 +86,18 @@ class NetInfo:
                 continue
             jid = node.getID()
             topo = JunctionTopo(jid)
+            edges_with_angle: list[tuple[str, float]] = []
             for edge in incoming:
                 eid = edge.getID()
                 info.edge_to_junction[eid] = jid
                 info.edge_length[eid] = edge.getLength()
                 dx, dy = _edge_heading(edge)
-                appr = _approach_of(dx, dy)
+                edges_with_angle.append((eid, math.degrees(math.atan2(dy, dx))))
+                topo.incoming_lanes += edge.getLaneNumber()
+            # 统一分配「互不相同」的来向字母，绝不把两条来路合并进同一相位
+            for eid, appr in assign_approaches(edges_with_angle).items():
                 topo.edge_approach[eid] = appr
                 topo.approach_edges.setdefault(appr, []).append(eid)
-                topo.incoming_lanes += edge.getLaneNumber()
             for conn in node.getConnections():
                 in_edge = conn.getFrom().getID()
                 out_edge = conn.getTo().getID()
@@ -124,6 +127,46 @@ def _approach_of(dx: float, dy: float) -> str:
     if abs(dx) >= abs(dy):
         return "W" if dx > 0 else "E"
     return "S" if dy > 0 else "N"
+
+
+# 方向锚点：车辆朝向角(deg) -> 来向字母（朝西=东来E，朝南=北来N，朝东=西来W，朝北=南来S）
+_APPROACH_ANCHORS = [("E", -180.0), ("N", -90.0), ("W", 0.0), ("S", 90.0)]
+
+
+def _angle_diff(a: float, b: float) -> float:
+    d = abs(a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
+def assign_approaches(edges: list[tuple[str, float]]) -> dict[str, str]:
+    """给一个路口的所有驶入边分配**互不相同**的来向字母（N/E/S/W），绝不合并。
+
+    ``edges`` 为 [(edge_id, heading_deg)]，heading_deg = atan2(dy,dx) ∈ (-180,180]。
+    按朝向角排序后，贪心把每条边分配给「最近且尚未被占用」的方向锚点，从而保证
+    4 边 → 4 相位、3 边 → 3 相位，避免不同来向被合并进同一相位导致冲突车流同时放行
+    （这是引发交通事故的严重安全问题）。
+    """
+    if not edges:
+        return {}
+    used: set[str] = set()
+    result: dict[str, str] = {}
+    for eid, ang in sorted(edges, key=lambda x: x[1]):
+        best: str | None = None
+        best_d = 1e18
+        for letter, anchor in _APPROACH_ANCHORS:
+            if letter in used:
+                continue
+            d = _angle_diff(ang, anchor)
+            if d < best_d:
+                best_d = d
+                best = letter
+        if best is None:  # 超过 4 条驶入边（罕见）：退回象限分类兜底
+            best = _approach_of(
+                math.cos(math.radians(ang)), math.sin(math.radians(ang))
+            )
+        used.add(best)
+        result[eid] = best
+    return result
 
 
 def canonical_movement(approach: str, direction: str) -> str:
