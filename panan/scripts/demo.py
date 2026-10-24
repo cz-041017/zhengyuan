@@ -26,7 +26,7 @@ from panan_bridge import run_simulation  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 SUMO_CFG = ROOT / "panan/config/panan.sumocfg"
-CONFIG = ROOT / "panan/config/panan.yaml"
+CONFIG = ROOT / "configs/default.yaml"   # 相位分组：模式A（P_N/P_E/P_S/P_W）
 
 
 def make_gif(frames: list[Path], out: Path, fps: int) -> None:
