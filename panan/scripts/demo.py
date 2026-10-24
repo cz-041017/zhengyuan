@@ -81,7 +81,7 @@ def auto_view() -> tuple[float, float]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="磐安县信号灯仿真可视化演示")
-    ap.add_argument("--end-time", type=float, default=600.0)
+    ap.add_argument("--end-time", type=float, default=86400.0, help="仿真时长(秒)，默认 86400 即长时间运行，可随时关闭窗口手动停止")
     ap.add_argument("--delay-ms", type=float, default=100.0)
     ap.add_argument("--controller", choices=["adaptive", "fixed"], default="adaptive")
     ap.add_argument("--gif", default=None, help="输出 GIF 路径；指定后离屏生成动画")

@@ -436,7 +436,12 @@ class Simulation:
         total_steps = int(round(end_time / step_length))
         arrived_total = 0
         for _ in range(total_steps):
-            traci.simulationStep()
+            try:
+                traci.simulationStep()
+            except Exception:
+                # 用户手动关闭了 sumo-gui 窗口 / 主动中断
+                print("仿真已手动停止", flush=True)
+                break
             now = traci.simulation.getTime()
             arrived_total += traci.simulation.getArrivedNumber()
 
@@ -530,7 +535,10 @@ class Simulation:
                     last_shot = now
 
         if screenshot_dir is not None:
-            traci.simulationStep()
+            try:
+                traci.simulationStep()
+            except Exception:
+                pass
 
         if metrics_path is not None:
             metrics_path.parent.mkdir(parents=True, exist_ok=True)

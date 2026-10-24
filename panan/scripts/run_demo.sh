@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# 一键可视化仿真（便于展示）。
+# 一键可视化仿真（便于展示；实时窗口默认长时间运行，可随时关闭窗口手动停止）。
 #
 # 用法（仓库根目录）：
-#   bash panan/scripts/run_demo.sh                # 实时窗口：自适应决策层控灯（默认 1200s）
+#   bash panan/scripts/run_demo.sh                # 实时窗口：自适应决策层控灯（长时运行，手动关闭停止）
 #   bash panan/scripts/run_demo.sh fixed           # 实时窗口：固定配时对照
 #   bash panan/scripts/run_demo.sh gif             # 离屏生成 GIF 动画（自适应，180s）
 #   bash panan/scripts/run_demo.sh gif fixed       # 离屏生成 GIF（固定配时）
@@ -20,7 +20,7 @@ MODE2="${2:-}"
 # 解析控制器与是否生成 GIF
 CTRL="adaptive"
 GIF=""
-END="1200"
+END="86400"                 # 实时窗口默认长时运行（可手动关闭停止）
 DELAY="100"
 case "$MODE" in
   fixed)  CTRL="fixed";;
