@@ -34,14 +34,40 @@ export PYTHONPATH=/usr/share/sumo/tools          # 换成你机器上 SUMO 工�
 
 # ② 离屏生成演示动画（无图形界面也能用）
 .venv/bin/python panan/scripts/demo.py --gif panan/results/demo.gif --end-time 180
-
-# ③ 完整实验 + 报告
-.venv/bin/python panan/scripts/panan_bridge.py \
-  --sumocfg panan/config/panan.sumocfg --config panan/config/panan.yaml \
-  --controller adaptive --end-time 3600 \
-  --metrics panan/results/adaptive.csv --report-json panan/results/adaptive_report.json
-.venv/bin/python panan/scripts/make_report.py     # 生成 仿真报告.md
 ```
+
+## 独立运行仿真验证（改完逻辑层后，一条命令重新评估）
+
+每次运行会自动把 **4 项指标追加一行** 到 `panan/results/metrics.csv`：
+
+```bash
+# 自适应决策层（默认 3600s）
+bash panan/scripts/run_eval.sh adaptive
+
+# 固定配时对照
+bash panan/scripts/run_eval.sh fixed
+
+# 自定义时长 / 改了路网后重新生成需求
+bash panan/scripts/run_eval.sh adaptive 1800
+bash panan/scripts/run_eval.sh adaptive 3600 regen
+```
+
+CSV 列：`timestamp, controller, config, net, seed, duration_s, arrived, avg_delay_s(平均车均延误), avg_queue_veh(平均排队车辆数), capacity_veh_per_h(通行能力), conflicts(冲突点数量)`。
+
+> 底层命令（等价）：
+> ```bash
+> .venv/bin/python panan/scripts/panan_bridge.py \
+>   --sumocfg panan/config/panan.sumocfg --config configs/default.yaml \
+>   --controller adaptive --end-time 3600 --csv panan/results/metrics.csv
+> ```
+
+## 相位分组与指标口径
+
+- **相位分组**：按 `configs/default.yaml` 模式A（`minor_only`）——`P_N/P_E/P_S/P_W`，每向「直行+左转」合并为一个相位，冲突矩阵为「任意两相位互斥」。三岔路口自动降为 3 相位（去掉缺失方向）。
+- **平均车均延误** = SUMO `timeLoss`（实际行程 − 自由流行程），按到达车辆平均。
+- **平均排队长度** = 信号灯进口道上「停车（速度<0.1m/s）」车辆数的时间平均。
+- **通行能力** = 实测每小时到达（驶离路网）车辆数 veh/h。
+- **冲突点数量** = 仿真期间实际碰撞车辆数（`getCollidingVehiclesNumber` 累计）；为 0 表示相位分组无同时放行冲突流向。
 
 ## 路网：真实磐安县 OSM（已就位，保留全部道路）
 
