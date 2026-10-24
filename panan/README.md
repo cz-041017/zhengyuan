@@ -23,17 +23,27 @@ panan/
     └── demo.gif             # 演示动画
 ```
 
-## 快速开始
+## 快速开始（一键可视化，便于展示）
 
 ```bash
 cd /home/ubuntu/zhengyuan
 export PYTHONPATH=/usr/share/sumo/tools          # 换成你机器上 SUMO 工具目录
 
-# ① 实时可视化（sumo-gui，决策层实时控灯）
-.venv/bin/python panan/scripts/demo.py --end-time 600 --delay-ms 100
+# 一键实时窗口：自适应决策层控灯（默认 1200s）
+bash panan/scripts/run_demo.sh
 
-# ② 离屏生成演示动画（无图形界面也能用）
-.venv/bin/python panan/scripts/demo.py --gif panan/results/demo.gif --end-time 180
+# 一键固定配时对照
+bash panan/scripts/run_demo.sh fixed
+
+# 一键离屏生成 GIF 动画（无图形界面也能用）
+bash panan/scripts/run_demo.sh gif
+```
+
+底层等价命令（更多参数用 demo.py）：
+
+```bash
+.venv/bin/python panan/scripts/demo.py --end-time 600 --delay-ms 100   # 实时窗口
+.venv/bin/python panan/scripts/demo.py --gif panan/results/demo.gif --end-time 180  # GIF
 ```
 
 ## 独立运行仿真验证（改完逻辑层后，一条命令重新评估）
