@@ -16,7 +16,7 @@ from traffic_control.timing_analysis import analyze_timing
 # Simulation-only placeholder timings. These are NOT audited values and must
 # never be used for deployment; deployment configs must carry reviewed
 # per-phase timings in signal.phases.
-_SIM_MIN_GREEN_S = 15.0
+_SIM_MIN_GREEN_S = 12.0
 _SIM_MAX_GREEN_S = 60.0
 _SIM_YELLOW_S = 3.0
 _SIM_ALL_RED_S = 1.0
@@ -50,7 +50,7 @@ def build_machine_config(config: dict[str, Any]) -> MachineConfig:
         switch_debounce_s=optimization["switch_debounce_s"],
         countdown_duration_s=config["countdown"]["display_duration_s"],
         pedestrian_max_red_s=pedestrian.get("max_red_s", 150.0),
-        pedestrian_min_green_s=pedestrian.get("min_green_s", 12.0),
+        pedestrian_min_green_s=float(pedestrian.get("min_green_s", 12.0)),
         data_gap_s=config.get("runtime", {}).get("data_gap_s", 6.0),
     )
 

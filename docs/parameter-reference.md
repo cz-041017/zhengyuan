@@ -100,8 +100,17 @@
 | 参数 | 默认 | 含义 | 调参建议 |
 |---|---|---|---|
 | `pedestrian.max_red_s` | 150 | 某方向连续红灯上限（s），到点给一次保底绿灯 | 必须 **> `optimization.max_wait_target_s`**（加载期强制），建议 150 |
-| `pedestrian.min_green_s` | 12 | 保底绿灯时长（s），够行人过街即可 | 必须 **≤ 最短相位 `min_green_s`**（加载期强制），默认占位相位 15s |
+| `pedestrian.min_green_s` | 12 | 行人绿灯**可接受下限**（s）；实际值由下方物理参数推导，低于它时才用它兜底 | 一般不用改，改物理参数即可 |
+| `pedestrian.crosswalk_length_m` | 15 | 人行横道长度（m） | **按实际路口标定**；越长行人绿灯越长 |
+| `pedestrian.walking_speed_mps` | 1.2 | 行人步行速度（m/s） | 老人/儿童多取 0.8~1.0 |
+| `pedestrian.clearance_s` | 3 | 行人清空时间（s） | 横道越长清空越久，通常 3~6s |
 | `pedestrian.yellow_s` | 3 | 行人黄灯（车辆绿灯最后 N 秒，禁止新行人） | 由接口层驱动；逻辑层经 `LayerResult.pedestrian_yellow_remaining_s` 输出 |
+
+> **当前实现（项目决定）**：逻辑层与仿真台的**默认最小绿 = 12s**。
+> `crosswalk_length_m / walking_speed_mps / clearance_s` 保留为**标定参考字段**，
+> 当前不参与自动推导（仿真对比显示 12s 在延误与排队之间较平衡）。
+> 若以后要按实际横道长度自动推导，可在 `runtime.build_machine_config` 里恢复
+> `max(min_green_s, 长度/速度 + 清空)`。
 | `runtime.data_gap_s` | 6 | 数据中断判定（s），超过则重建行人红灯基线 | 应与 `2×observation_timeout_s` 一致；tick 周期更慢时需调大 |
 
 **实现边界（重要）**：

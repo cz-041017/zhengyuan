@@ -247,7 +247,7 @@ def test_pedestrian_yellow_remaining_window() -> None:
             ["north_through", "east_through", "south_through", "west_through"], 1
         )
     ]
-    # Placeholder min green = 15 s, pedestrian yellow = 3 s -> starts at 12 s.
+    # Placeholder min green = 12 s, pedestrian yellow = 3 s -> starts at 9 s.
     def fresh(now: float):
         return [
             VehicleObservation(
@@ -259,11 +259,11 @@ def test_pedestrian_yellow_remaining_window() -> None:
         ]
 
     layer.tick(0.0, st("P_N", 0.0), observations=fresh(0.0))
-    r12 = layer.tick(12.0, st("P_N", 0.0), observations=fresh(12.0))
-    assert r12.pedestrian_yellow_remaining_s == pytest.approx(3.0)
-    r135 = layer.tick(13.5, st("P_N", 0.0), observations=fresh(13.5))
+    r13 = layer.tick(9.0, st("P_N", 0.0), observations=fresh(9.0))
+    assert r13.pedestrian_yellow_remaining_s == pytest.approx(3.0)
+    r135 = layer.tick(10.5, st("P_N", 0.0), observations=fresh(10.5))
     assert r135.pedestrian_yellow_remaining_s == pytest.approx(1.5)
-    r15 = layer.tick(15.0, st("P_N", 0.0), observations=fresh(15.0))
+    r15 = layer.tick(12.0, st("P_N", 0.0), observations=fresh(12.0))
     assert r15.pedestrian_yellow_remaining_s == pytest.approx(0.0)
 
 

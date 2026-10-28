@@ -47,7 +47,7 @@ SATURATION_FLOW_VPH = 1800.0  # 每车道饱和流率（veh/h）
 DETECT_DIST_M = 60.0  # 距停止线多近算「进入路口区域」（用于通过时间）
 
 # 相位配时默认值（可调，非审核值）
-DEFAULT_MIN_GREEN = 10.0
+DEFAULT_MIN_GREEN = 12.0
 DEFAULT_MAX_GREEN = 60.0
 DEFAULT_YELLOW = 3.0
 DEFAULT_ALL_RED = 1.0
@@ -223,6 +223,7 @@ class JunctionController:
 def build_junction_phases(
     topo: JunctionTopo,
     groups: tuple[Any, ...],
+    min_green: float = DEFAULT_MIN_GREEN,
 ) -> tuple[dict[str, SignalPhase], dict[str, str], dict[str, str]]:
     """按 config 的相位分组（phase_groups）为每个路口构建相位。
 
@@ -243,7 +244,7 @@ def build_junction_phases(
         phases[pid] = SignalPhase(
             phase_id=pid,
             movement_ids=appr_movements[appr],
-            min_green_s=DEFAULT_MIN_GREEN,
+            min_green_s=min_green,
             max_green_s=DEFAULT_MAX_GREEN,
             yellow_s=DEFAULT_YELLOW,
             all_red_s=DEFAULT_ALL_RED,
@@ -263,11 +264,12 @@ class SimulationResult:
 
 
 class Simulation:
-    def __init__(self, net_path: str | Path, config: dict[str, Any], *, controller: str = "adaptive", fixed_green_s: float = 30.0) -> None:
+    def __init__(self, net_path: str | Path, config: dict[str, Any], *, controller: str = "adaptive", fixed_green_s: float = 30.0, min_green: float = DEFAULT_MIN_GREEN) -> None:
         self.netinfo = NetInfo.load(net_path)
         self.config = config
         self.controller = controller
         self.fixed_green_s = fixed_green_s
+        self.min_green = min_green
         self.controllers: dict[str, JunctionController] = {}
 
     # -- 装配 ---------------------------------------------------------------
@@ -290,7 +292,7 @@ class Simulation:
         # 初始相位错开：按 junction id 哈希。
         for jid in sorted(tls_ids):
             topo = self.netinfo.junctions[jid]
-            phases, phase_approach, approach_phase = build_junction_phases(topo, groups)
+            phases, phase_approach, approach_phase = build_junction_phases(topo, groups, self.min_green)
             scorer = Scorer(score_cfg)
             spillback = SpillbackMonitor(score_cfg.o_high, score_cfg.o_low)
             feedback = FeedbackMonitor(self.config["runtime"]["confirm_timeout_s"])
@@ -328,7 +330,7 @@ class Simulation:
                         phases[pid] = SignalPhase(
                             phase_id=pid,
                             movement_ids=appr_movements.get(appr, frozenset()),
-                            min_green_s=DEFAULT_MIN_GREEN,
+                            min_green_s=self.min_green,
                             max_green_s=DEFAULT_MAX_GREEN,
                             yellow_s=DEFAULT_YELLOW,
                             all_red_s=DEFAULT_ALL_RED,
@@ -643,7 +645,7 @@ def _edge_heading_from_traci(traci: Any, edge_id: str) -> tuple[float, float]:
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
-def run_simulation(sumocfg, config_path, *, controller="adaptive", fixed_green_s=30.0, end_time=3600.0, step_length=1.0, metrics_path=None, gui=False, delay_ms=100.0, screenshot_dir=None, screenshot_every_s=None, view_zoom=None, view_offset=None, close=True):
+def run_simulation(sumocfg, config_path, *, controller="adaptive", fixed_green_s=30.0, min_green=DEFAULT_MIN_GREEN, end_time=3600.0, step_length=1.0, metrics_path=None, gui=False, delay_ms=100.0, screenshot_dir=None, screenshot_every_s=None, view_zoom=None, view_offset=None, close=True):
     import xml.etree.ElementTree as ET
 
     tree = ET.parse(str(sumocfg))
@@ -658,7 +660,7 @@ def run_simulation(sumocfg, config_path, *, controller="adaptive", fixed_green_s
     else:
         import libsumo as traci
         traci.start(["sumo", "-c", str(sumocfg), "--step-length", str(step_length), "--start", "--quit-on-end", "--no-warnings", "true"])
-    sim = Simulation(net_path, config, controller=controller, fixed_green_s=fixed_green_s)
+    sim = Simulation(net_path, config, controller=controller, fixed_green_s=fixed_green_s, min_green=min_green)
     try:
         if view_offset is not None:
             try:
@@ -716,6 +718,7 @@ def main() -> None:
     ap.add_argument("--config", required=True)
     ap.add_argument("--controller", choices=["adaptive", "fixed"], default="adaptive")
     ap.add_argument("--fixed-green-s", type=float, default=30.0)
+    ap.add_argument("--min-green", type=float, default=DEFAULT_MIN_GREEN, help="相位最小绿（s），用于对比 10/15 的影响")
     ap.add_argument("--end-time", type=float, default=3600.0)
     ap.add_argument("--step-length", type=float, default=1.0)
     ap.add_argument("--metrics", default=None)
@@ -728,6 +731,7 @@ def main() -> None:
 
     result = run_simulation(
         args.sumocfg, args.config, controller=args.controller, fixed_green_s=args.fixed_green_s,
+        min_green=args.min_green,
         end_time=args.end_time, step_length=args.step_length,
         metrics_path=Path(args.metrics) if args.metrics else None, gui=args.gui, delay_ms=args.delay_ms,
     )

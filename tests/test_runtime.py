@@ -95,7 +95,7 @@ def test_build_phases_uses_placeholders_when_empty() -> None:
     runtime = build_runtime(load_config(DEFAULT))
 
     assert set(runtime.phases) == {"P_N", "P_E", "P_S", "P_W"}
-    assert runtime.phases["P_N"].min_green_s == 15.0  # project decision: 15 s
+    assert runtime.phases["P_N"].min_green_s == 12.0  # project decision: 12 s
 
 
 def test_build_phases_rejects_layout_mismatch() -> None:

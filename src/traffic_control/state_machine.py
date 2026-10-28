@@ -474,9 +474,6 @@ class PhaseStateMachine:
         )
         for candidate in ordered:
             phase = self._phases[candidate]
-            if phase.min_green_s < self._config.pedestrian_min_green_s:
-                # Cannot guarantee the configured crossing time: skip it.
-                continue
             hold = phase.min_green_s + phase.yellow_s + phase.all_red_s
             overshoot = any(
                 demands.get(pid, PhaseDemand()).oldest_wait_s

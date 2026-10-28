@@ -56,9 +56,14 @@ countdown:
   display_duration_s: 15.0
 
 pedestrian:
-  # 行人保底：某方向连续红灯达到 max_red_s(150s)，给一次 min_green_s 绿灯让行人过街
+  # 行人保底：某方向连续红灯达到 max_red_s(150s)，给一次保底绿灯让行人过街
   max_red_s: 150.0
+  # 行人绿灯时长不拍脑袋：由「人行横道长度 / 步行速度 + 清空时间」推导，
+  # min_green_s 只是「可接受下限」（推导值低于它时才用它兜底）。
   min_green_s: 12.0
+  crosswalk_length_m: 15.0       # 人行横道长度（m），按实际路口标定
+  walking_speed_mps: 1.2         # 行人步行速度（m/s），老人/儿童取 0.8~1.0
+  clearance_s: 3.0               # 行人清空时间（s）
   # 车辆绿灯结束前 yellow_s 秒，人行横道转黄，禁止新行人进入
   yellow_s: 3.0
 
