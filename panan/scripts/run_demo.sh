@@ -21,7 +21,7 @@ MODE2="${2:-}"
 CTRL="adaptive"
 GIF=""
 END="86400"                 # 实时窗口默认长时运行（可手动关闭停止）
-DELAY="100"
+DELAY="250"                 # 时间流速：每仿真秒 250ms 真实时间（约 4 倍速，更接近现实便于演示）
 case "$MODE" in
   fixed)  CTRL="fixed";;
   gif)    GIF="panan/results/demo.gif"; END="180"; [ "$MODE2" = "fixed" ] && CTRL="fixed";;
@@ -31,10 +31,12 @@ esac
 if [ ! -f panan/demand/panan_routes.rou.xml ] || [ panan/network/panan.net.xml -nt panan/demand/panan_routes.rou.xml ]; then
   echo "==> 生成随机 OD 需求（路网已变更或需求缺失）"
   python3 "$SUMO_TOOLS/randomTrips.py" -n panan/network/panan.net.xml \
-    -o panan/demand/panan_trips.xml -e 3600 --period 1.5 --fringe-factor 5 --min-distance 300 --seed 42
-  echo "==> 生成奉庆线额外车流"
-  .venv/bin/python panan/scripts/gen_fengqing_flow.py --count 400 --out panan/demand/fengqing_trips.xml
-  duarouter -n panan/network/panan.net.xml -r panan/demand/panan_trips.xml,panan/demand/fengqing_trips.xml \
+    -o panan/demand/panan_trips.xml -e 3600 --period 1.2 --fringe-factor 5 --min-distance 300 --seed 42
+  echo "==> 生成奉庆线额外车流（含奉庆线→E10方向）"
+  .venv/bin/python panan/scripts/gen_fengqing_flow.py --count 500 --to-e10 400 --out panan/demand/fengqing_trips.xml
+  .venv/bin/python panan/scripts/merge_trips.py panan/demand/panan_all_trips.xml \
+    panan/demand/panan_trips.xml panan/demand/fengqing_trips.xml
+  duarouter -n panan/network/panan.net.xml -r panan/demand/panan_all_trips.xml \
     -o panan/demand/panan_routes.rou.xml --seed 42 --ignore-errors
 fi
 
