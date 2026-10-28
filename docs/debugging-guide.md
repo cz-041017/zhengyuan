@@ -42,7 +42,7 @@ uv sync
 
 ```powershell
 uv run pytest -q
-# 期望输出：143 passed
+# 期望输出：155 passed
 
 uv run python --version
 # 期望：Python 3.11.x
@@ -215,7 +215,7 @@ print("依赖抢占的相位：", a.preempt_required)
 |---|---|---|
 | SUMO | 已安装（含 `sumo-gui`、`netconvert`、`duarouter`） | `sumo --version` |
 | SUMO Python 绑定 | 工具目录（默认 `/usr/share/sumo/tools`） | `ls /usr/share/sumo/tools/sumolib` |
-| 项目依赖 | 已 `uv sync`（或仓库自带 `.venv`） | `uv run pytest -q`（143 passed） |
+| 项目依赖 | 已 `uv sync`（或仓库自带 `.venv`） | `uv run pytest -q`（155 passed） |
 | 路网 | `panan/network/panan.net.xml`（磐安县手绘路网） | 已随仓库提供 |
 
 > 如果 SUMO 装在其他路径，用环境变量指定：`export SUMO_TOOLS=/你的/sumo/tools`。

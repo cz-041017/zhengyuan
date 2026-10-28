@@ -70,7 +70,7 @@ def test_phase_score_composition_and_priority_order() -> None:
     assert green_wave > demand_max
 
     # Wait urgency near deadline outranks green wave (P0 > P2):
-    # 120s wait gives 5.0 urgency, exceeding +2.0.
+    # 130s wait gives 5.0 urgency (120s is ~3.2), exceeding +2.0.
     starving = scorer.phase_score(0, 120.0)
     assert starving > green_wave
 

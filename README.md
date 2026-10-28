@@ -3,7 +3,7 @@
 > 仓库地址：<https://github.com/cz-041017/zhengyuan>
 > 项目名（pyproject）：`smart-traffic-control`　版本：`0.1.0`
 > 语言 / 版本：Python ≥ 3.11（用 uv 管理依赖）
-> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），143 个单元测试全部通过
+> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），155 个单元测试全部通过
 >
 > 文档索引：算法设计 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)　·　感知层接口 [`docs/perception-interface.md`](docs/perception-interface.md)　·　可调参数 [`docs/parameter-reference.md`](docs/parameter-reference.md)　·　调试与复现 [`docs/debugging-guide.md`](docs/debugging-guide.md)
 
@@ -253,7 +253,7 @@ zhengyuan/
 git clone https://github.com/cz-041017/zhengyuan.git
 cd zhengyuan
 uv sync                                       # 按 uv.lock 创建虚拟环境并安装依赖
-uv run pytest                                 # 期望：154 passed（全部测试通过）
+uv run pytest                                 # 期望：155 passed（全部测试通过）
 uv run smart-traffic-control                  # 入口自检：打印 decision engine ready
 ```
 
@@ -332,7 +332,7 @@ print(decision.selected_phase_id)   # -> P_W（因为 P0 等待保障，触发�
 - [x] 最坏情况时序分析（`timing_analysis.py`）
 - [x] 感知层接口边界与文档（`perception.py`）
 - [x] 配置 → 运行时端到端装配（`runtime.py`）
-- [x] 143 个单元测试 + CLI 入口
+- [x] 155 个单元测试 + CLI 入口
 - [x] 磐安县真实路网仿真台（`panan/`，可视化演示 + 指标统计）
 
 ### 部分实现 / 未接线（重要，避免误读）
