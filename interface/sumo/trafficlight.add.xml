@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<additional xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/additional_file.xsd">
+  <!-- Default program is a single all-red phase; run_simulation.py takes over
+       the light each step via setRedYellowGreenState. 8 controlled lanes (2 per
+       approach) -> 8-char state string. -->
+  <tlLogic id="center" type="static" programID="0" offset="0">
+    <phase duration="1000" state="rrrrrrrr"/>
+  </tlLogic>
+</additional>

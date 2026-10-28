@@ -5,6 +5,8 @@ from typing import Any
 
 import yaml
 
+from traffic_control.scoring import ScoreConfig
+
 
 class ConfigError(ValueError):
     """Raised when project configuration is missing or invalid."""
@@ -180,6 +182,8 @@ def validate_config(config: dict[str, Any]) -> None:
             "in the configured order"
         )
 
+    _validate_score_ordering(optimization)
+
     countdown = config["countdown"]
     _require_positive_number(
         countdown.get("display_duration_s"),
@@ -213,6 +217,7 @@ def validate_config(config: dict[str, Any]) -> None:
     for flag in safety_flags:
         if not isinstance(safety.get(flag), bool):
             raise ConfigError(f"safety.{flag} must be a boolean")
+
 
 def _validate_layout(signal: dict[str, Any]) -> None:
     layout = signal.get("layout")
@@ -261,6 +266,7 @@ def _validate_conflict_matrix(signal: dict[str, Any]) -> None:
 
 
 def _validate_phases(phases: list[Any]) -> None:
+    seen_phase_ids: set[str] = set()
     for item in phases:
         if not isinstance(item, dict):
             raise ConfigError("signal.phases entries must be mappings")
@@ -269,6 +275,12 @@ def _validate_phases(phases: list[Any]) -> None:
             raise ConfigError(
                 "signal.phases[].phase_id must be a non-empty string"
             )
+        if phase_id in seen_phase_ids:
+            raise ConfigError(
+                f"signal.phases contains duplicate phase_id {phase_id!r}; "
+                "each phase must be defined exactly once"
+            )
+        seen_phase_ids.add(phase_id)
         movement_ids = item.get("movement_ids")
         if not isinstance(movement_ids, list) or not movement_ids:
             raise ConfigError(
@@ -296,6 +308,32 @@ def _validate_phases(phases: list[Any]) -> None:
         _require_non_negative_number(
             item.get("all_red_s", 0.0), "signal.phases[].all_red_s"
         )
+
+
+def _validate_score_ordering(optimization: dict[str, Any]) -> None:
+    """Surface the P0/P1/P2/P3 weight guardrails at config-load time.
+
+    The ordering rules live in ``scoring.ScoreConfig``; building one here turns
+    its ``ValueError`` into a ``ConfigError`` so an unsafe weight combination
+    is rejected before the runtime is assembled.
+    """
+    demand = optimization["demand"]
+    spillback = optimization["spillback"]
+    try:
+        ScoreConfig(
+            max_wait_target_s=optimization["max_wait_target_s"],
+            wait_urgency_start_s=optimization["wait_urgency_start_s"],
+            wait_urgency_max_score=optimization["wait_urgency_max_score"],
+            green_wave_score=optimization["green_wave_score"],
+            demand_vehicle_weight=demand["vehicle_weight"],
+            demand_wait_weight=demand["wait_weight"],
+            n_max=demand["n_max"],
+            spillback_penalty=spillback["penalty"],
+            o_high=spillback["o_high"],
+            o_low=spillback["o_low"],
+        )
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def _validate_green_wave(green_wave: dict[str, Any]) -> None:

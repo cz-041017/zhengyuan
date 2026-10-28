@@ -1,5 +1,8 @@
 # 决策层可调参数参考（调参手册）
 
+> 代码里一次取全：`DecisionLayer.from_yaml(path).parameters` 返回 `TunableParameters`
+> （含 `max_wait_target_s`、`observation_timeout_s`、`score.*` 等分组字段）。
+
 > 全部初值均为**待标定值**，须经仿真 + 真机标定后方可部署；**任何改动不得破坏优先级相对次序 P0 > P1 > P2 > P3**。
 > 参数集中在 [`configs/*.yaml`](../configs/) 与 [`config_loader.py`](../src/traffic_control/config_loader.py) 的校验里。
 > 仿真台（磐安县路网演示）的参数在第 9 节。
@@ -201,3 +204,32 @@ optimization.priorities:
 ```
 
 > 顺序即语义优先级，改动会被 `config_loader` 拒绝。
+
+## 7. 优先级护栏（代码强制）
+
+`ScoreConfig` 构造时校验下列不等式，违反即拒绝加载：
+
+```text
+green_wave_score > demand.vehicle_weight + demand.wait_weight   # P2 > P3
+wait_urgency_max_score > green_wave_score                        # P0 紧迫 > P2
+|spillback.penalty| > wait_urgency_max_score                     # P1 压制 > 其余
+```
+
+默认值 `1.0 < 2.0 < 5.0 < 1000` 已满足。`green_wave_score = 0` 表示关闭绿波层，此时第一条不校验（其余两条仍生效）。
+
+## 8. 参数汇总入口
+
+代码侧用 `TunableParameters` 一次取全，不必记住各参数散落在哪：
+
+```python
+from traffic_control.decision_layer import DecisionLayer
+
+layer = DecisionLayer.from_yaml("configs/simulation.yaml")
+p = layer.parameters
+p.max_wait_target_s, p.observation_timeout_s, p.confirm_timeout_s
+p.queue_speed_threshold_mps, p.vehicle_length_m, p.stopped_gap_m, p.stale_after_s
+p.score.green_wave_score, p.score.spillback_penalty, p.score.n_max
+p.machine.countdown_duration_s, p.machine.score_hysteresis
+```
+
+相位配时（min/max 绿、黄灯、全红）属审核数据，仍在 `signal.phases`，不在 `TunableParameters` 内。

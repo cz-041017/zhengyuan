@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+  <vType id="car" accel="2.6" decel="4.5" length="5.0" maxSpeed="13.89" sigma="0.5"/>
+
+  <route id="n_s" edges="N2C C2S"/>
+  <route id="n_e" edges="N2C C2E"/>
+  <route id="e_w" edges="E2C C2W"/>
+  <route id="e_s" edges="E2C C2S"/>
+  <route id="s_n" edges="S2C C2N"/>
+  <route id="s_w" edges="S2C C2W"/>
+  <route id="w_e" edges="W2C C2E"/>
+  <route id="w_n" edges="W2C C2N"/>
+
+  <!-- through: 400 veh/h, left: 150 veh/h -->
+  <flow id="f_n_s" route="n_s" begin="0" end="1800" vehsPerHour="400"/>
+  <flow id="f_n_e" route="n_e" begin="0" end="1800" vehsPerHour="150"/>
+  <flow id="f_e_w" route="e_w" begin="0" end="1800" vehsPerHour="400"/>
+  <flow id="f_e_s" route="e_s" begin="0" end="1800" vehsPerHour="150"/>
+  <flow id="f_s_n" route="s_n" begin="0" end="1800" vehsPerHour="400"/>
+  <flow id="f_s_w" route="s_w" begin="0" end="1800" vehsPerHour="150"/>
+  <flow id="f_w_e" route="w_e" begin="0" end="1800" vehsPerHour="400"/>
+  <flow id="f_w_n" route="w_n" begin="0" end="1800" vehsPerHour="150"/>
+</routes>

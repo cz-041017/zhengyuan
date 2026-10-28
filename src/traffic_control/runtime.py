@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +11,7 @@ from traffic_control.models import SignalPhase
 from traffic_control.phasing import ConflictMatrix, PhaseGroup, phase_groups
 from traffic_control.scoring import ScoreConfig, Scorer, SpillbackMonitor
 from traffic_control.state_machine import MachineConfig, PhaseStateMachine
+from traffic_control.timing_analysis import analyze_timing
 
 # Simulation-only placeholder timings. These are NOT audited values and must
 # never be used for deployment; deployment configs must carry reviewed
@@ -72,17 +75,22 @@ def build_phases(config: dict[str, Any]) -> dict[str, SignalPhase]:
     phase_items = config["signal"]["phases"]
 
     if phase_items:
-        phases = {
-            item["phase_id"]: SignalPhase(
-                phase_id=item["phase_id"],
+        phases: dict[str, SignalPhase] = {}
+        for item in phase_items:
+            phase_id = item["phase_id"]
+            if phase_id in phases:
+                raise ValueError(
+                    f"duplicate phase definition for {phase_id!r} in "
+                    "signal.phases; each phase must be defined exactly once"
+                )
+            phases[phase_id] = SignalPhase(
+                phase_id=phase_id,
                 movement_ids=frozenset(item["movement_ids"]),
                 min_green_s=item["min_green_s"],
                 max_green_s=item["max_green_s"],
                 yellow_s=item["yellow_s"],
                 all_red_s=item.get("all_red_s", 0.0),
             )
-            for item in phase_items
-        }
         _cross_check_phases(phases, groups)
         return phases
 
@@ -151,6 +159,17 @@ def build_runtime(config: dict[str, Any]) -> RuntimeObjects:
     score_config = build_score_config(config)
     machine_config = build_machine_config(config)
     phases = build_phases(config)
+
+    analysis = analyze_timing(phases, score_config.max_wait_target_s)
+    if not analysis.feasible_120s:
+        warnings.warn(
+            "timing may be infeasible: the largest switch overhead "
+            f"({analysis.max_time_to_green_s:.1f}s) reaches the wait deadline "
+            f"({score_config.max_wait_target_s:.1f}s), so the P0 guarantee "
+            "cannot hold even with an immediate preemption. Shorten the "
+            "minimum greens or the clearance times.",
+            stacklevel=2,
+        )
 
     scorer = Scorer(score_config)
     spillback_monitor = SpillbackMonitor(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from traffic_control.models import ControllerMode, ControllerState, PhaseDecision
 
@@ -28,20 +27,25 @@ class FeedbackMonitor:
         if confirm_timeout_s <= 0:
             raise ValueError("confirm_timeout_s must be positive")
         self._confirm_timeout_s = confirm_timeout_s
-        self._pending_target: Optional[str] = None
-        self._from_phase: Optional[str] = None
-        self._proposed_at: Optional[float] = None
+        self._pending_target: str | None = None
+        self._from_phase: str | None = None
+        self._proposed_at: float | None = None
 
     def observe(
         self, decision: PhaseDecision, state: ControllerState, now: float
     ) -> FeedbackStatus:
         """Record a switch proposal and check its confirmation status.
 
-        A non-null ``decision.selected_phase_id`` (re)arms the monitor with
-        the new target; otherwise the previous pending switch is re-checked
-        against the actual controller state.
+        The monitor arms once per target. Re-proposing the same target on
+        consecutive ticks must not restart the confirmation clock: the state
+        machine re-issues a pending preemption or max-green switch every tick,
+        and restarting the clock would let a controller that never executes
+        be waited on forever.
         """
-        if decision.selected_phase_id is not None:
+        if (
+            decision.selected_phase_id is not None
+            and self._pending_target != decision.selected_phase_id
+        ):
             self._pending_target = decision.selected_phase_id
             self._from_phase = state.current_phase_id
             self._proposed_at = now

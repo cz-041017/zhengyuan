@@ -176,3 +176,29 @@ def test_rejects_enabled_green_wave_without_phase() -> None:
 
     with pytest.raises(ConfigError, match="main_through_phase"):
         validate_config(config)
+
+
+def test_rejects_duplicate_phase_id() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    phase = {
+        "phase_id": "P_N",
+        "movement_ids": ["north_through", "north_left"],
+        "min_green_s": 10,
+        "max_green_s": 60,
+        "yellow_s": 3,
+        "all_red_s": 1,
+    }
+    config["signal"]["phases"] = [phase, dict(phase)]
+
+    with pytest.raises(ConfigError, match="duplicate phase_id"):
+        validate_config(config)
+
+
+def test_rejects_weights_breaking_priority_order() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    config["optimization"]["demand"]["vehicle_weight"] = 1.0
+    config["optimization"]["demand"]["wait_weight"] = 1.0
+    config["optimization"]["green_wave_score"] = 0.5
+
+    with pytest.raises(ConfigError, match="P2 outranks P3"):
+        validate_config(config)

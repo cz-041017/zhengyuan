@@ -3,7 +3,7 @@
 > 仓库地址：<https://github.com/cz-041017/zhengyuan>
 > 项目名（pyproject）：`smart-traffic-control`　版本：`0.1.0`
 > 语言 / 版本：Python ≥ 3.11（用 uv 管理依赖）
-> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），102 个单元测试全部通过
+> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），122 个单元测试全部通过
 >
 > 文档索引：算法设计 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)　·　感知层接口 [`docs/perception-interface.md`](docs/perception-interface.md)　·　可调参数 [`docs/parameter-reference.md`](docs/parameter-reference.md)　·　调试与复现 [`docs/debugging-guide.md`](docs/debugging-guide.md)
 
@@ -169,6 +169,7 @@
 | [`timing_analysis.py`](src/traffic_control/timing_analysis.py) | 最坏情况时序分析 | `analyze_timing`、`TimingAnalysis` |
 | [`perception.py`](src/traffic_control/perception.py) | 感知层输入边界 | `RawDetection`、`DownstreamReport`、`PerceptionFrame`、`normalize_detections`、`downstream_occupancy` |
 | [`runtime.py`](src/traffic_control/runtime.py) | 配置 → 运行时端到端装配 | `build_runtime`、`RuntimeObjects`、`build_phases` 等 |
+| [`decision_layer.py`](src/traffic_control/decision_layer.py) | **决策层门面**：一步串起排队→降级→溢流→状态机→反馈，并汇总全部可调参数 | `DecisionLayer`、`TunableParameters`、`LayerResult` |
 
 ---
 
@@ -203,12 +204,14 @@ zhengyuan/
 │   ├── feedback.py                  # 执行反馈（E 状态）
 │   ├── timing_analysis.py           # 最坏情况时序分析
 │   ├── perception.py                # 感知层接口边界
-│   └── runtime.py                   # 配置 → 运行时装配
-├── tests/                           # 10 个测试文件 / 102 个用例
+│   ├── runtime.py                   # 配置 → 运行时装配
+│   └── decision_layer.py            # 决策层门面（一键调用 + 参数汇总）
+├── tests/                           # 11 个测试文件 / 122 个用例
 ├── .gitignore
 ├── .python-version                  # 3.11
 ├── pyproject.toml                   # 依赖：pyyaml；dev：pytest
 ├── uv.lock                          # 依赖锁定
+├── AGENTS.md                        # 协作代理 / 同事的最小工作规程
 └── README.md
 ```
 
@@ -222,7 +225,7 @@ zhengyuan/
 git clone https://github.com/cz-041017/zhengyuan.git
 cd zhengyuan
 uv sync                                       # 按 uv.lock 创建虚拟环境并安装依赖
-uv run pytest                                 # 期望：102 passed（全部测试通过）
+uv run pytest                                 # 期望：122 passed（全部测试通过）
 uv run smart-traffic-control                  # 入口自检：打印 decision engine ready
 ```
 
@@ -301,15 +304,18 @@ print(decision.selected_phase_id)   # -> P_W（因为 P0 等待保障，触发�
 - [x] 最坏情况时序分析（`timing_analysis.py`）
 - [x] 感知层接口边界与文档（`perception.py`）
 - [x] 配置 → 运行时端到端装配（`runtime.py`）
-- [x] 102 个单元测试 + CLI 入口
+- [x] 122 个单元测试 + CLI 入口
 - [x] 磐安县真实路网仿真台（`panan/`，可视化演示 + 指标统计）
 
 ### 部分实现 / 未接线（重要，避免误读）
 
 - [ ] **P2 绿波**：参数与配置校验已实现（`green_wave.*`），但**运行时窗口计算尚未接线**，
   仿真台硬编码 `green_wave_active=False`；因此 P2 当前**不生效**。
-- [ ] **降级 / 执行反馈的仿真台接线**：`DegradationController`、`FeedbackMonitor` 模块已实现，
-  但仿真台 `panan_bridge.py` 目前**未消费**降级结果与 `FeedbackStatus`（仅构造、未驱动决策）。
+- [x] **降级 / 执行反馈（决策层已接线）**：`DecisionLayer` 门面（`decision_layer.py`）已把
+  排队估计 → 数据新鲜度/降级 → 保守等待 → 溢流滞回 → 状态机 → 执行反馈串成一条链，
+  `layer.tick()` 返回 `result.degradation` / `result.feedback`。
+- [ ] **仿真台的降级/反馈接线**：`panan_bridge.py` 仍直接调 `state_machine.tick()`，
+  **未走 `DecisionLayer` 门面**，因此仿真中降级/反馈不生效（属仿真台接线缺口，非决策层缺口）。
 - [ ] **`safety.*` 三个开关**：`config_loader.py` 只校验其布尔类型，**全库无消费者**，当前不产生实际约束力。
 - [ ] **信号配时从配置读取**：仿真台相位配时仍用代码占位值（`runtime.py` / `panan_bridge.py`），
   未读取 `configs/*.yaml` 的 `signal.phases`（默认为空）。

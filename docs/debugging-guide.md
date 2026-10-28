@@ -42,7 +42,7 @@ uv sync
 
 ```powershell
 uv run pytest -q
-# 期望输出：102 passed
+# 期望输出：122 passed
 
 uv run python --version
 # 期望：Python 3.11.x
@@ -56,6 +56,25 @@ uv run smart-traffic-control
 ---
 
 ## 2. 跑一次决策（最小示例）
+
+> **推荐用门面 `DecisionLayer`**（内部串起 排队估计 → 数据新鲜度/降级 → 保守等待 → 溢流滞回 → 状态机 → 执行反馈）：
+>
+> ```python
+> from traffic_control.decision_layer import DecisionLayer
+> from traffic_control.models import ControllerMode, ControllerState, VehicleObservation
+>
+> layer = DecisionLayer.from_yaml("configs/simulation.yaml")
+> p = layer.parameters          # 全部可调参数一次取全（TunableParameters）
+> result = layer.tick(
+>     now=120.0,
+>     state=ControllerState(mode=ControllerMode.NORMAL, current_phase_id="P_MT", phase_started_at=0.0),
+>     observations=[VehicleObservation(track_id=1, lane_id="west_through", observed_at=0.0, speed_mps=0.0)],
+>     downstream_occupancy={"east_through": 0.9},   # None 表示未知，按拥堵处理
+> )
+> print(result.decision.selected_phase_id, result.degradation, result.feedback)
+> ```
+>
+> 下面是最小手动 tick 版本（适合只关注状态机时）：
 
 ```python
 from traffic_control.config_loader import load_config
@@ -170,7 +189,7 @@ print("依赖抢占的相位：", a.preempt_required)
 |---|---|---|
 | SUMO | 已安装（含 `sumo-gui`、`netconvert`、`duarouter`） | `sumo --version` |
 | SUMO Python 绑定 | 工具目录（默认 `/usr/share/sumo/tools`） | `ls /usr/share/sumo/tools/sumolib` |
-| 项目依赖 | 已 `uv sync`（或仓库自带 `.venv`） | `uv run pytest -q`（102 passed） |
+| 项目依赖 | 已 `uv sync`（或仓库自带 `.venv`） | `uv run pytest -q`（122 passed） |
 | 路网 | `panan/network/panan.net.xml`（磐安县手绘路网） | 已随仓库提供 |
 
 > 如果 SUMO 装在其他路径，用环境变量指定：`export SUMO_TOOLS=/你的/sumo/tools`。
