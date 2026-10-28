@@ -16,7 +16,7 @@ from traffic_control.timing_analysis import analyze_timing
 # Simulation-only placeholder timings. These are NOT audited values and must
 # never be used for deployment; deployment configs must carry reviewed
 # per-phase timings in signal.phases.
-_SIM_MIN_GREEN_S = 10.0
+_SIM_MIN_GREEN_S = 15.0
 _SIM_MAX_GREEN_S = 60.0
 _SIM_YELLOW_S = 3.0
 _SIM_ALL_RED_S = 1.0
@@ -44,10 +44,14 @@ def build_score_config(config: dict[str, Any]) -> ScoreConfig:
 def build_machine_config(config: dict[str, Any]) -> MachineConfig:
     """Build the switch-gating parameters from a validated configuration."""
     optimization = config["optimization"]
+    pedestrian = config.get("pedestrian") or {}
     return MachineConfig(
         score_hysteresis=optimization["score_hysteresis"],
         switch_debounce_s=optimization["switch_debounce_s"],
         countdown_duration_s=config["countdown"]["display_duration_s"],
+        pedestrian_max_red_s=pedestrian.get("max_red_s", 150.0),
+        pedestrian_min_green_s=pedestrian.get("min_green_s", 12.0),
+        data_gap_s=config.get("runtime", {}).get("data_gap_s", 6.0),
     )
 
 
@@ -72,6 +76,7 @@ def build_phases(config: dict[str, Any]) -> dict[str, SignalPhase]:
     used and clearly flagged as un-audited.
     """
     groups = build_phase_groups(config)
+    group_map = {group.phase_id: group for group in groups}
     phase_items = config["signal"]["phases"]
 
     if phase_items:
@@ -90,11 +95,17 @@ def build_phases(config: dict[str, Any]) -> dict[str, SignalPhase]:
                 max_green_s=item["max_green_s"],
                 yellow_s=item["yellow_s"],
                 all_red_s=item.get("all_red_s", 0.0),
+                crosswalk_ids=(
+                    group_map[phase_id].crosswalk_ids
+                    if phase_id in group_map
+                    else frozenset()
+                ),
             )
         _cross_check_phases(phases, groups)
+        _warn_pedestrian_min_green(phases, config)
         return phases
 
-    return {
+    placeholder = {
         group.phase_id: SignalPhase(
             phase_id=group.phase_id,
             movement_ids=group.movement_ids,
@@ -102,9 +113,32 @@ def build_phases(config: dict[str, Any]) -> dict[str, SignalPhase]:
             max_green_s=_SIM_MAX_GREEN_S,
             yellow_s=_SIM_YELLOW_S,
             all_red_s=_SIM_ALL_RED_S,
+            crosswalk_ids=group.crosswalk_ids,
         )
         for group in groups
     }
+    _warn_pedestrian_min_green(placeholder, config)
+    return placeholder
+
+
+def _warn_pedestrian_min_green(
+    phases: dict[str, SignalPhase], config: dict[str, Any]
+) -> None:
+    """A pedestrian hold lasts one phase minimum green.
+
+    If a phase's minimum green is shorter than ``pedestrian.min_green_s`` the
+    guarantee cannot actually give pedestrians their configured crossing time;
+    warn loudly instead of silently under-serving them.
+    """
+    required = (config.get("pedestrian") or {}).get("min_green_s", 12.0)
+    for phase in phases.values():
+        if phase.min_green_s < required:
+            warnings.warn(
+                f"phase {phase.phase_id!r} min_green_s={phase.min_green_s}s "
+                f"is shorter than pedestrian.min_green_s={required}s; "
+                "pedestrian guarantee will be under-served",
+                stacklevel=3,
+            )
 
 
 def _cross_check_phases(

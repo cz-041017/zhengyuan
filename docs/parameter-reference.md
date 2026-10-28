@@ -40,8 +40,8 @@
 
 | 参数 | 默认 | 含义 | 调参建议 |
 |---|---|---|---|
-| `optimization.max_wait_target_s` | 120 | P0 单方向最长等待（s），硬指标 | 国标/甲方要求，一般不动 |
-| `optimization.wait_urgency_start_s` | 80 | S_wait 软预警起点（s） | 越接近 120 越「激进」，太小会过早压过绿波 |
+| `optimization.max_wait_target_s` | 130 | P0 单方向最长等待（s），硬指标 | 国标/甲方要求，一般不动 |
+| `optimization.wait_urgency_start_s` | 80 | S_wait 软预警起点（s） | 越接近 130 越「激进」，太小会过早压过绿波 |
 | `optimization.wait_urgency_max_score` | 5.0 | S_wait 峰值（必须 > 绿波 2.0） | 保持 > `green_wave_score`，保证 P0 压过 P2 |
 | `optimization.green_wave_score` | 2.0 | P2 绿波加分 | 必须 < `wait_urgency_max_score`，避免绿波淹没 P0 |
 | `optimization.demand.vehicle_weight` | 0.6 | P3 车辆数权重 | 与 wait_weight 之和宜 =1 |
@@ -64,7 +64,7 @@
 | `signal.phases[].phase_id` | — | 相位 ID | 须与冲突表键一致 |
 | `signal.phases[].movement_ids` | — | 该相位包含的规范流向 | 只能是 8 个规范 ID |
 | `signal.phases[].min_green_s` | — | 最小绿（s，硬下限） | 需满足行人过街/清空，来自审核 |
-| `signal.phases[].max_green_s` | — | 最大绿（s，硬上限） | 过长会让 120s 依赖抢占（见时序分析） |
+| `signal.phases[].max_green_s` | — | 最大绿（s，硬上限） | 过长会让 130s 依赖抢占（见时序分析） |
 | `signal.phases[].yellow_s` | — | 黄灯（s） | 来自 GB 25280/审核配置，不臆造 |
 | `signal.phases[].all_red_s` | — | 全红（s） | 同上 |
 
@@ -74,7 +74,7 @@
 > `green_wave.enabled=true` 时 `main_through_phase` 必填。
 >
 > 提示：`deployment` 模式要求 `signal.phases` **非空且完整**；`simulation` 模式可留空（构建器用占位配时）。
-> 跑 [`timing_analysis.py`](../src/traffic_control/timing_analysis.py) 看「无抢占最坏等待」，若远超 120s 说明 max 绿配得太长。
+> 跑 [`timing_analysis.py`](../src/traffic_control/timing_analysis.py) 看「无抢占最坏等待」，若远超 130s 说明 max 绿配得太长。
 
 ## 6. 绿波（`green_wave`，P2）
 
@@ -94,6 +94,28 @@
 | 参数 | 默认 | 含义 | 调参建议 |
 |---|---|---|---|
 | `countdown.display_duration_s` | 15 | 15s 切换倒数（s） | 参考 GA/T 508 倒计时显示要求；**具体数值需核验标准全文**，不冒充国标规定值 |
+
+## 7.5 行人保底（`pedestrian`）
+
+| 参数 | 默认 | 含义 | 调参建议 |
+|---|---|---|---|
+| `pedestrian.max_red_s` | 150 | 某方向连续红灯上限（s），到点给一次保底绿灯 | 必须 **> `optimization.max_wait_target_s`**（加载期强制），建议 150 |
+| `pedestrian.min_green_s` | 12 | 保底绿灯时长（s），够行人过街即可 | 必须 **≤ 最短相位 `min_green_s`**（加载期强制），默认占位相位 15s |
+| `pedestrian.yellow_s` | 3 | 行人黄灯（车辆绿灯最后 N 秒，禁止新行人） | 由接口层驱动；逻辑层经 `LayerResult.pedestrian_yellow_remaining_s` 输出 |
+| `runtime.data_gap_s` | 6 | 数据中断判定（s），超过则重建行人红灯基线 | 应与 `2×observation_timeout_s` 一致；tick 周期更慢时需调大 |
+
+**实现边界（重要）**：
+- 本段**可选**（缺省用默认值 150/12/3），旧配置（如 `panan/config/panan.yaml`）无需改。
+- 行人绿灯**绑定直行相位**，映射为：
+  - 普通路口（`minor_only`）：北→东、东→南、南→西、西→北（顺时针相邻人行横道）；
+  - 绿波（`main_road`）：南北直行→东西两侧、南北左转→4 向全红、东向→北向、西向→南向。
+    两套规则是**项目定义**，不统一；`EW` 绿波为 `P_N→W`、`P_S→E`。
+- 保底**不会**把任何方向推过 `max_wait_target_s`：若保底会让某方向超时，则否决该次保底。
+- `pedestrian.yellow_s` 的倒计时窗口以**相位最小绿结束**为锚；若绿灯延长到 `max_green`，
+  接口层应基于实际剩余绿灯自行计算（逻辑层字段只覆盖最小绿窗口）。
+- **仿真台注意**：`panan_bridge.py` 的相位 `min_green_s` 硬编码为 10，小于默认
+  `pedestrian.min_green_s=12`，因此**仿真台里行人保底会被跳过**（候选 min_green < 12 被拒绝）。
+  若要在仿真中观察行人保底，需把仿真台相位最小绿调到 ≥12。
 
 ## 8. 安全开关（`safety`）
 

@@ -6,12 +6,12 @@ from typing import Any, Mapping, Sequence
 
 from traffic_control.config_loader import load_config, validate_config
 from traffic_control.degradation import (
-    DegradationController,
     DegradationMode,
     conservative_oldest_wait,
 )
-from traffic_control.feedback import FeedbackMonitor, FeedbackStatus
+from traffic_control.feedback import FeedbackStatus
 from traffic_control.models import (
+    ControllerMode,
     ControllerState,
     LaneState,
     PhaseDecision,
@@ -21,7 +21,15 @@ from traffic_control.phasing import PhaseGroup
 from traffic_control.queue_estimator import QueueEstimator
 from traffic_control.runtime import RuntimeObjects, build_runtime
 from traffic_control.scoring import ScoreConfig, aggregate_demand
+from traffic_control.startup import StartupSequence, StartupStage
 from traffic_control.state_machine import MachineConfig, PhaseDemand
+from traffic_control.telemetry import (
+    AlarmEvent,
+    AlarmLevel,
+    AlarmType,
+    NullTelemetrySink,
+    TelemetrySink,
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +49,11 @@ class TunableParameters:
     stale_after_s: float
     score: ScoreConfig
     machine: MachineConfig
+    # Pedestrian guarantee knobs (exposed for the interface layer: it drives
+    # the pedestrian lamps and the 3 s pedestrian-yellow from these values).
+    pedestrian_max_red_s: float = 150.0
+    pedestrian_min_green_s: float = 12.0
+    pedestrian_yellow_s: float = 3.0
 
     @property
     def max_wait_target_s(self) -> float:
@@ -59,6 +72,14 @@ class LayerResult:
     demands: Mapping[str, PhaseDemand]
     lane_states: Mapping[str, LaneState]
     downstream_blocked: Mapping[str, bool]
+    startup: StartupStage | None = None
+    # Crosswalks released by the current green phase (empty when silent).
+    # The interface layer drives pedestrian lamps from this set.
+    active_crosswalks: frozenset[str] = frozenset()
+    # Remaining seconds of the pedestrian-yellow window (0 = not yellow).
+    # Derived from the phase's minimum green: the last ``pedestrian.yellow_s``
+    # seconds of green forbid new pedestrians from entering.
+    pedestrian_yellow_remaining_s: float = 0.0
 
 
 class DecisionLayer:
@@ -87,25 +108,38 @@ class DecisionLayer:
     explicit ``None`` for a movement whose downstream state is unknown; that
     is treated as congested. A movement omitted from the mapping is simply not
     evaluated this tick.
+
+    Control-room takeover (single junction)::
+
+        layer.takeover(now)   # silent; emits no proposals
+        layer.release(now)    # in-memory reset + 5 s flash / 10 s all-red
+
+    Telemetry: pass a ``TelemetrySink`` to receive alarms/logs. The default is
+    a local-logging ``NullTelemetrySink``; no network code lives here.
     """
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        sink: TelemetrySink | None = None,
+    ) -> None:
         validate_config(config)
-        runtime: RuntimeObjects = build_runtime(config)
+        self._config = config
+        self._sink: TelemetrySink = sink or NullTelemetrySink()
+        self._runtime: RuntimeObjects = build_runtime(config)
         queue_config = config["queue_estimation"]
 
-        self._runtime = runtime
         self._queue = QueueEstimator(
             queue_speed_threshold_mps=queue_config["queue_speed_threshold_mps"],
             vehicle_length_m=queue_config["vehicle_length_m"],
             stopped_gap_m=queue_config["stopped_gap_m"],
             stale_after_s=queue_config["stale_after_s"],
         )
-        self._spillback = runtime.spillback_monitor
-        self._degradation = runtime.degradation
-        self._feedback = runtime.feedback_monitor
-        self._machine = runtime.state_machine
-        self._groups: tuple[PhaseGroup, ...] = runtime.phase_groups
+        self._spillback = self._runtime.spillback_monitor
+        self._degradation = self._runtime.degradation
+        self._feedback = self._runtime.feedback_monitor
+        self._machine = self._runtime.state_machine
+        self._groups: tuple[PhaseGroup, ...] = self._runtime.phase_groups
 
         self._parameters = TunableParameters(
             observation_timeout_s=config["runtime"]["observation_timeout_s"],
@@ -116,8 +150,11 @@ class DecisionLayer:
             vehicle_length_m=queue_config["vehicle_length_m"],
             stopped_gap_m=queue_config["stopped_gap_m"],
             stale_after_s=queue_config["stale_after_s"],
-            score=runtime.score_config,
-            machine=runtime.machine_config,
+            score=self._runtime.score_config,
+            machine=self._runtime.machine_config,
+            pedestrian_max_red_s=(config.get("pedestrian") or {}).get("max_red_s", 150.0),
+            pedestrian_min_green_s=(config.get("pedestrian") or {}).get("min_green_s", 12.0),
+            pedestrian_yellow_s=(config.get("pedestrian") or {}).get("yellow_s", 3.0),
         )
 
         movements: set[str] = set()
@@ -127,11 +164,19 @@ class DecisionLayer:
         # Memory of the last tick each movement reported anything, so a dead
         # feed becomes "stale" (conservative wait) instead of "empty".
         self._last_seen: dict[str, float] = {}
+        # Manual override / startup gating.
+        self._manual_override = False
+        self._startup: StartupSequence | None = None
+        self._last_mode: DegradationMode | None = None
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> DecisionLayer:
+    def from_yaml(
+        cls,
+        path: str | Path,
+        sink: TelemetrySink | None = None,
+    ) -> DecisionLayer:
         """Build the layer from a YAML config file."""
-        return cls(load_config(path))
+        return cls(load_config(path), sink=sink)
 
     @property
     def parameters(self) -> TunableParameters:
@@ -140,6 +185,94 @@ class DecisionLayer:
     @property
     def runtime(self) -> RuntimeObjects:
         return self._runtime
+
+    @property
+    def manual_override(self) -> bool:
+        return self._manual_override
+
+    @property
+    def startup(self) -> StartupSequence | None:
+        return self._startup
+
+    # -- control-room takeover ---------------------------------------------
+    def takeover(self, now: float) -> None:
+        """Enter manual override: this junction stops emitting proposals."""
+        if self._manual_override:
+            return
+        self._manual_override = True
+        self._startup = None
+        self._machine.reset_transient()
+        self._sink.report_alarm(
+            AlarmEvent(
+                alarm_type=AlarmType.TAKEOVER,
+                junction_id=None,
+                now=now,
+                level=AlarmLevel.WARNING,
+            )
+        )
+
+    def release(self, now: float) -> None:
+        """Leave manual override: reset in-memory state and start the sequence."""
+        if not self._manual_override:
+            return
+        self._manual_override = False
+        self._reset_state()
+        self._startup = StartupSequence(started_at=now)
+        self._sink.report_alarm(
+            AlarmEvent(
+                alarm_type=AlarmType.RELEASE,
+                junction_id=None,
+                now=now,
+                level=AlarmLevel.INFO,
+            )
+        )
+        self._sink.report_alarm(
+            AlarmEvent(
+                alarm_type=AlarmType.STARTUP_SEQUENCE,
+                junction_id=None,
+                now=now,
+                level=AlarmLevel.INFO,
+                detail={
+                    "flash_s": self._startup.flash_s,
+                    "all_red_s": self._startup.all_red_s,
+                },
+            )
+        )
+
+    def _reset_state(self) -> None:
+        """In-memory reset (no process restart): rebuild runtime + queues."""
+        self._runtime = build_runtime(self._config)
+        queue_config = self._config["queue_estimation"]
+        self._queue = QueueEstimator(
+            queue_speed_threshold_mps=queue_config["queue_speed_threshold_mps"],
+            vehicle_length_m=queue_config["vehicle_length_m"],
+            stopped_gap_m=queue_config["stopped_gap_m"],
+            stale_after_s=queue_config["stale_after_s"],
+        )
+        self._spillback = self._runtime.spillback_monitor
+        self._degradation = self._runtime.degradation
+        self._feedback = self._runtime.feedback_monitor
+        self._machine = self._runtime.state_machine
+        self._groups = self._runtime.phase_groups
+        movements: set[str] = set()
+        for group in self._groups:
+            movements.update(group.movement_ids)
+        self._movements = movements
+        self._parameters = TunableParameters(
+            observation_timeout_s=self._config["runtime"]["observation_timeout_s"],
+            confirm_timeout_s=self._config["runtime"]["confirm_timeout_s"],
+            queue_speed_threshold_mps=queue_config["queue_speed_threshold_mps"],
+            vehicle_length_m=queue_config["vehicle_length_m"],
+            stopped_gap_m=queue_config["stopped_gap_m"],
+            stale_after_s=queue_config["stale_after_s"],
+            score=self._runtime.score_config,
+            machine=self._runtime.machine_config,
+            pedestrian_max_red_s=(self._config.get("pedestrian") or {}).get("max_red_s", 150.0),
+            pedestrian_min_green_s=(self._config.get("pedestrian") or {}).get("min_green_s", 12.0),
+            pedestrian_yellow_s=(self._config.get("pedestrian") or {}).get("yellow_s", 3.0),
+        )
+        self._last_seen = {}
+        self._last_mode = None
 
     def tick(
         self,
@@ -150,6 +283,21 @@ class DecisionLayer:
         green_wave_active: Mapping[str, bool] | None = None,
     ) -> LayerResult:
         """Produce one decision from one perception frame."""
+        # 1) Manual override: fully silent, no proposal at all.
+        if self._manual_override or state.mode == ControllerMode.MANUAL_OVERRIDE:
+            self._feedback.reset()
+            return self._silent(now, "manual_override", DegradationMode.NORMAL)
+
+        # 2) Startup sequence in progress (after a release / restart).
+        if self._startup is not None:
+            stage = self._startup.stage(now)
+            if stage is StartupStage.DONE:
+                self._startup = None
+            else:
+                return self._silent(
+                    now, "startup_sequence", DegradationMode.NORMAL, stage
+                )
+
         occupancy = downstream_occupancy or {}
         green_wave = green_wave_active or {}
 
@@ -174,8 +322,53 @@ class DecisionLayer:
         mode = self._degradation.decide(now, phase_ids, last_seen)
         demands = self._apply_conservative_waits(demands, last_seen, now)
 
+        # 3) Data watchdog: FAILSAFE hands control to the signal controller.
+        # Diagnostics (demands / lane_states) are kept so operators can see why.
+        if mode is DegradationMode.FAILSAFE:
+            self._report_mode_change(now, mode)
+            # Do not carry a stale countdown or pending switch across the gap.
+            self._machine.reset_transient()
+            self._feedback.reset()
+            return LayerResult(
+                now=now,
+                decision=PhaseDecision(None, "failsafe_hold", feasible=False),
+                degradation=mode,
+                feedback=FeedbackStatus.IDLE,
+                demands=demands,
+                lane_states=lane_states,
+                downstream_blocked=blocked_by_phase,
+            )
+        self._report_mode_change(now, mode)
+
         decision = self._machine.tick(state, now, demands)
         feedback = self._feedback.observe(decision, state, now)
+
+        current_phase = self._runtime.phases.get(
+            state.current_phase_id or ""
+        )
+        active_crosswalks = (
+            current_phase.crosswalk_ids
+            if current_phase is not None
+            else frozenset()
+        )
+        yellow_remaining = 0.0
+        if current_phase is not None:
+            yellow = self._parameters.pedestrian_yellow_s
+            green_min_end = state.phase_started_at + current_phase.min_green_s
+            if now >= green_min_end - yellow:
+                yellow_remaining = max(0.0, green_min_end - now)
+
+        # Surface hard infeasibilities as alarms (never silently swallow).
+        if not decision.feasible:
+            self._sink.report_alarm(
+                AlarmEvent(
+                    alarm_type=AlarmType.NO_FEASIBLE_PHASE,
+                    junction_id=None,
+                    now=now,
+                    level=AlarmLevel.WARNING,
+                    detail={"reason": decision.reason},
+                )
+            )
 
         return LayerResult(
             now=now,
@@ -185,9 +378,69 @@ class DecisionLayer:
             demands=demands,
             lane_states=lane_states,
             downstream_blocked=blocked_by_phase,
+            active_crosswalks=active_crosswalks,
+            pedestrian_yellow_remaining_s=yellow_remaining,
         )
 
     # -- internals ---------------------------------------------------------
+    def _silent(
+        self,
+        now: float,
+        reason: str,
+        mode: DegradationMode,
+        stage: StartupStage | None = None,
+        *,
+        feasible: bool = True,
+    ) -> LayerResult:
+        """A result that deliberately proposes nothing."""
+        return LayerResult(
+            now=now,
+            decision=PhaseDecision(
+                None,
+                reason,
+                feasible=feasible,
+            ),
+            degradation=mode,
+            feedback=FeedbackStatus.IDLE,
+            demands={},
+            lane_states={},
+            downstream_blocked={},
+            startup=stage,
+        )
+
+    def _report_mode_change(
+        self, now: float, mode: DegradationMode
+    ) -> None:
+        """Emit an alarm only when the degradation mode changes."""
+        if mode is self._last_mode:
+            return
+        previous = self._last_mode
+        self._last_mode = mode
+        if mode is DegradationMode.FAILSAFE:
+            self._sink.report_alarm(
+                AlarmEvent(
+                    alarm_type=AlarmType.FAILSAFE,
+                    junction_id=None,
+                    now=now,
+                    level=AlarmLevel.CRITICAL,
+                    detail={
+                        "previous": previous.value if previous else None
+                    },
+                )
+            )
+        elif mode is DegradationMode.PARTIAL:
+            self._sink.report_alarm(
+                AlarmEvent(
+                    alarm_type=AlarmType.PARTIAL,
+                    junction_id=None,
+                    now=now,
+                    level=AlarmLevel.WARNING,
+                    detail={
+                        "previous": previous.value if previous else None
+                    },
+                )
+            )
+
     def _aggregate(
         self,
         lane_states: Mapping[str, LaneState],
@@ -241,7 +494,7 @@ class DecisionLayer:
         resolved: dict[str, PhaseDemand] = {}
 
         for phase_id, demand in demands.items():
-            if phase_id in freshness.stale:
+            if phase_id in freshness.stale or phase_id in freshness.dead:
                 wait = conservative_oldest_wait(
                     now,
                     last_seen.get(phase_id),

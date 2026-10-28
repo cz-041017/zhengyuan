@@ -57,6 +57,12 @@ class FeedbackMonitor:
             self._clear()
             return FeedbackStatus.FAILURE
 
+        # Manual takeover: the control room owns the lights. Drop any pending
+        # confirmation instead of reporting a (false) execution failure.
+        if state.mode == ControllerMode.MANUAL_OVERRIDE:
+            self._clear()
+            return FeedbackStatus.IDLE
+
         if state.current_phase_id == self._pending_target:
             self._clear()
             return FeedbackStatus.CONFIRMED
@@ -74,6 +80,10 @@ class FeedbackMonitor:
             return FeedbackStatus.FAILURE
 
         return FeedbackStatus.PENDING
+
+    def reset(self) -> None:
+        """Drop a pending switch, e.g. when control is handed over."""
+        self._clear()
 
     def _clear(self) -> None:
         self._pending_target = None

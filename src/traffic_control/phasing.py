@@ -38,6 +38,24 @@ LEFT_MOVEMENTS = {
     "W": WEST_LEFT,
 }
 
+# ---------------------------------------------------------------------------
+# Pedestrian crossings. Each crossing is named by the side of the intersection
+# it lies on. A phase that releases vehicles may only release the crossing(s)
+# that do not conflict with the released movements.
+# ---------------------------------------------------------------------------
+
+CROSSINGS = {
+    "N": "north_crossing",
+    "E": "east_crossing",
+    "S": "south_crossing",
+    "W": "west_crossing",
+}
+
+# Ordinary (non green-wave) junction: the crossing adjacent to each approach
+# in clockwise order (N->E, E->S, S->W, W->N). This is the side a left-turning
+# vehicle exits away from, so through + left movements stay conflict-free.
+NEXT_SIDE_CROSSING = {"N": "E", "E": "S", "S": "W", "W": "N"}
+
 
 class LayoutMode:
     """Supported intersection layouts."""
@@ -57,6 +75,7 @@ class PhaseGroup:
     phase_id: str
     movement_ids: frozenset[str]
     green_wave_eligible: bool = False
+    crosswalk_ids: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.phase_id.strip():
@@ -78,11 +97,15 @@ def phase_groups(
         form one group; each minor approach merges through + left.
     """
     if mode == LayoutMode.MINOR_ONLY:
-        return (
-            PhaseGroup("P_N", APPROACH_MOVEMENTS["N"]),
-            PhaseGroup("P_E", APPROACH_MOVEMENTS["E"]),
-            PhaseGroup("P_S", APPROACH_MOVEMENTS["S"]),
-            PhaseGroup("P_W", APPROACH_MOVEMENTS["W"]),
+        return tuple(
+            PhaseGroup(
+                f"P_{approach}",
+                APPROACH_MOVEMENTS[approach],
+                crosswalk_ids=frozenset(
+                    {CROSSINGS[NEXT_SIDE_CROSSING[approach]]}
+                ),
+            )
+            for approach in ("N", "E", "S", "W")
         )
 
     if mode == LayoutMode.MAIN_ROAD:
@@ -103,11 +126,32 @@ def phase_groups(
             minor_second = APPROACH_MOVEMENTS["S"]
             minor_first_id, minor_second_id = "P_N", "P_S"
 
+        # Green-wave rules (project decision): the main-road through phase
+        # releases both crossings alongside the main road; the main-road left
+        # turn releases none (all-red for pedestrians); each minor approach
+        # releases one crossing.
+        if main_road_direction == "NS":
+            mt_crossings = frozenset({CROSSINGS["E"], CROSSINGS["W"]})
+            first_crossing = frozenset({CROSSINGS["N"]})  # east approach -> N
+            second_crossing = frozenset({CROSSINGS["S"]})  # west approach -> S
+        else:  # EW
+            mt_crossings = frozenset({CROSSINGS["N"], CROSSINGS["S"]})
+            # The crossing on the *left-turn exit* side is the one the left
+            # turn would drive through; pick the opposite side so through and
+            # left are both conflict-free (mirrors the NS rule).
+            first_crossing = frozenset({CROSSINGS["W"]})  # north approach -> W
+            second_crossing = frozenset({CROSSINGS["E"]})  # south approach -> E
+
         return (
-            PhaseGroup("P_MT", main_through, green_wave_eligible=True),
-            PhaseGroup("P_ML", main_left),
-            PhaseGroup(minor_first_id, minor_first),
-            PhaseGroup(minor_second_id, minor_second),
+            PhaseGroup(
+                "P_MT",
+                main_through,
+                green_wave_eligible=True,
+                crosswalk_ids=mt_crossings,
+            ),
+            PhaseGroup("P_ML", main_left, crosswalk_ids=frozenset()),
+            PhaseGroup(minor_first_id, minor_first, crosswalk_ids=first_crossing),
+            PhaseGroup(minor_second_id, minor_second, crosswalk_ids=second_crossing),
         )
 
     raise ValueError(f"unknown layout mode: {mode!r}")

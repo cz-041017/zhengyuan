@@ -190,6 +190,35 @@ def validate_config(config: dict[str, Any]) -> None:
         "countdown.display_duration_s",
     )
 
+    # Pedestrian guarantee is optional; defaults match runtime.build_machine_config
+    # so older configs (e.g. panan/config/panan.yaml) keep loading.
+    pedestrian = config.get("pedestrian", {})
+    if pedestrian is None:
+        pedestrian = {}
+    if not isinstance(pedestrian, dict):
+        raise ConfigError("pedestrian section must be a mapping")
+    _require_positive_number(
+        pedestrian.get("max_red_s", 150.0),
+        "pedestrian.max_red_s",
+    )
+    _require_positive_number(
+        pedestrian.get("min_green_s", 12.0),
+        "pedestrian.min_green_s",
+    )
+    # Ordering guard: the pedestrian limit must be looser than the vehicle
+    # deadline, otherwise the guarantee would preempt normal scoring forever.
+    if pedestrian.get("max_red_s", 150.0) <= optimization.get(
+        "max_wait_target_s", 120.0
+    ):
+        raise ConfigError(
+            "pedestrian.max_red_s must be greater than "
+            "optimization.max_wait_target_s"
+        )
+    _require_non_negative_number(
+        pedestrian.get("yellow_s", 3.0),
+        "pedestrian.yellow_s",
+    )
+
     signal = config["signal"]
     _validate_layout(signal)
     _validate_conflict_matrix(signal)
@@ -199,6 +228,28 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ConfigError("signal.phases must be a list")
 
     _validate_phases(phases)
+
+    if phases:
+        phase_min_greens = [
+            item["min_green_s"]
+            for item in phases
+            if isinstance(item.get("min_green_s"), (int, float))
+        ]
+        if phase_min_greens and pedestrian.get("min_green_s", 12.0) > min(
+            phase_min_greens
+        ):
+            raise ConfigError(
+                "pedestrian.min_green_s must not exceed the shortest phase "
+                "min_green_s"
+            )
+    else:
+        # Placeholder (simulation) phases use a 15 s minimum green; a larger
+        # pedestrian requirement cannot be honoured there either.
+        if pedestrian.get("min_green_s", 12.0) > 15.0:
+            raise ConfigError(
+                "pedestrian.min_green_s must not exceed the placeholder "
+                "phase min_green_s (15 s)"
+            )
 
     if runtime["mode"] == "deployment" and not phases:
         raise ConfigError(

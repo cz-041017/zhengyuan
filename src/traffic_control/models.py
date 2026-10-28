@@ -16,6 +16,7 @@ class ControllerMode(str, Enum):
     CLEARANCE = "clearance"
     ALL_RED = "all_red"
     FAULT = "fault"
+    MANUAL_OVERRIDE = "manual_override"
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class SignalPhase:
     max_green_s: float
     yellow_s: float
     all_red_s: float = 0.0
+    crosswalk_ids: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         if not self.phase_id.strip():

@@ -10,27 +10,45 @@ class DegradationMode(str, Enum):
 
     NORMAL = "normal"  # all phases fresh -> adaptive
     PARTIAL = "partial"  # some stale -> adaptive with conservative waits
-    FAILSAFE = "failsafe"  # no fresh data -> fixed-time / flash (GB 25280)
+    FAILSAFE = "failsafe"  # all feeds dead -> fixed-time / flash (GB 25280)
 
 
 @dataclass(frozen=True)
 class Freshness:
+    """Three-level freshness.
+
+    ``fresh`` reported within ``timeout_s``; ``stale`` between ``timeout_s`` and
+    ``2*timeout_s`` (PARTIAL); ``dead`` never reported or beyond ``2*timeout_s``
+    (FAILSAFE). A dead feed is UNKNOWN and must never be treated as "empty".
+    """
+
     fresh: frozenset[str]
     stale: frozenset[str]
+    dead: frozenset[str] = frozenset()
 
 
 class DataFreshness:
-    """Per-phase observation freshness.
+    """Per-phase observation freshness with a two-strike failsafe window.
 
-    A phase is fresh only when it has reported within ``timeout_s``. A phase
-    that has never reported, or whose report has expired, is stale — stale
-    means UNKNOWN and must never be treated as "empty".
+    The watchdog rule is fixed by project decision: a phase is PARTIAL after
+    one timeout period and FAILSAFE after two timeout periods (``2*timeout_s``)
+    of silence. This avoids a single dropped frame flipping the whole system
+    into fixed-time.
     """
 
     def __init__(self, timeout_s: float) -> None:
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
         self._timeout_s = timeout_s
+        self._failsafe_after_s = 2.0 * timeout_s
+
+    @property
+    def timeout_s(self) -> float:
+        return self._timeout_s
+
+    @property
+    def failsafe_after_s(self) -> float:
+        return self._failsafe_after_s
 
     def assess(
         self,
@@ -40,11 +58,30 @@ class DataFreshness:
     ) -> Freshness:
         ids = set(phase_ids)
         fresh: set[str] = set()
+        stale: set[str] = set()
+        dead: set[str] = set()
         for phase_id in ids:
             seen_at = last_seen.get(phase_id)
-            if seen_at is not None and 0 <= now - seen_at <= self._timeout_s:
+            if seen_at is None:
+                dead.add(phase_id)
+                continue
+            age = now - seen_at
+            if age < 0:
+                # Future timestamp is a clock-skew frame. Treat it as stale
+                # (PARTIAL) rather than dead so one bad frame cannot flip the
+                # whole junction to fixed-time.
+                stale.add(phase_id)
+            elif age <= self._timeout_s:
                 fresh.add(phase_id)
-        return Freshness(fresh=frozenset(fresh), stale=frozenset(ids - fresh))
+            elif age <= self._failsafe_after_s:
+                stale.add(phase_id)
+            else:
+                dead.add(phase_id)
+        return Freshness(
+            fresh=frozenset(fresh),
+            stale=frozenset(stale),
+            dead=frozenset(dead),
+        )
 
 
 class DegradationController:
@@ -53,6 +90,14 @@ class DegradationController:
     def __init__(self, timeout_s: float) -> None:
         self._freshness = DataFreshness(timeout_s)
 
+    @property
+    def timeout_s(self) -> float:
+        return self._freshness.timeout_s
+
+    @property
+    def failsafe_after_s(self) -> float:
+        return self._freshness.failsafe_after_s
+
     def decide(
         self,
         now: float,
@@ -60,9 +105,11 @@ class DegradationController:
         last_seen: Mapping[str, float | None],
     ) -> DegradationMode:
         freshness = self._freshness.assess(now, phase_ids, last_seen)
-        if not freshness.fresh:
+        # No phase has reported within one timeout: all feeds are dead/stale.
+        if not freshness.fresh and not freshness.stale:
             return DegradationMode.FAILSAFE
-        if freshness.stale:
+        # Any phase beyond two timeout periods (or never seen) is degraded.
+        if freshness.stale or freshness.dead:
             return DegradationMode.PARTIAL
         return DegradationMode.NORMAL
 

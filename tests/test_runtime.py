@@ -25,7 +25,7 @@ SIMULATION = PROJECT_ROOT / "configs" / "simulation.yaml"
 def test_build_score_config_defaults() -> None:
     cfg = build_score_config(load_config(DEFAULT))
 
-    assert cfg.max_wait_target_s == 120.0
+    assert cfg.max_wait_target_s == 130.0
     assert cfg.wait_urgency_start_s == 80.0
     assert cfg.wait_urgency_max_score == 5.0
     assert cfg.green_wave_score == 2.0
@@ -95,7 +95,7 @@ def test_build_phases_uses_placeholders_when_empty() -> None:
     runtime = build_runtime(load_config(DEFAULT))
 
     assert set(runtime.phases) == {"P_N", "P_E", "P_S", "P_W"}
-    assert runtime.phases["P_N"].min_green_s == 10.0
+    assert runtime.phases["P_N"].min_green_s == 15.0  # project decision: 15 s
 
 
 def test_build_phases_rejects_layout_mismatch() -> None:
@@ -121,13 +121,13 @@ def test_runtime_assembles_and_decides() -> None:
     state = ControllerState(
         mode=ControllerMode.NORMAL,
         current_phase_id="P_MT",
-        phase_started_at=0.0,
+        phase_started_at=-20.0,  # elapsed 20 s > 15 s min green
     )
     demands = {
         "P_MT": PhaseDemand(green_wave_active=True),
         "P_ML": PhaseDemand(),
         "P_E": PhaseDemand(),
-        "P_W": PhaseDemand(oldest_wait_s=120.0),
+        "P_W": PhaseDemand(oldest_wait_s=130.0),
     }
 
     decision = runtime.state_machine.tick(state, 12.0, demands)
@@ -147,9 +147,15 @@ def test_runtime_includes_degradation_controller() -> None:
         == DegradationMode.NORMAL
     )
 
+    # Between 1x and 2x timeout: PARTIAL. Beyond 2x timeout: FAILSAFE.
     all_stale = {phase_id: 5.0 for phase_id in phases}
     assert (
         runtime.degradation.decide(now, phases, all_stale)
+        == DegradationMode.PARTIAL
+    )
+    all_dead = {phase_id: 3.0 for phase_id in phases}
+    assert (
+        runtime.degradation.decide(now, phases, all_dead)
         == DegradationMode.FAILSAFE
     )
 

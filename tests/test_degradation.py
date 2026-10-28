@@ -9,15 +9,16 @@ from traffic_control.degradation import (
 PHASES = {"P_N", "P_E", "P_S", "P_W"}
 
 
-def test_freshness_fresh_within_timeout_and_never_seen_stale() -> None:
+def test_freshness_fresh_within_timeout_and_never_seen_dead() -> None:
     tracker = DataFreshness(timeout_s=3.0)
 
     result = tracker.assess(10.0, PHASES, {"P_N": 9.0, "P_E": 8.0})
 
     assert "P_N" in result.fresh
     assert "P_E" in result.fresh
-    # Never-seen phases are stale (unknown), never "empty".
-    assert result.stale == frozenset({"P_S", "P_W"})
+    # Never-seen phases are dead (unknown), never "empty".
+    assert result.dead == frozenset({"P_S", "P_W"})
+    assert result.stale == frozenset()
 
 
 def test_freshness_stale_beyond_timeout() -> None:
@@ -34,6 +35,7 @@ def test_freshness_future_timestamp_is_stale() -> None:
 
     result = tracker.assess(10.0, {"P_N"}, {"P_N": 12.0})
 
+    # Clock skew is tolerated as PARTIAL, not escalated to FAILSAFE.
     assert result.stale == frozenset({"P_N"})
 
 
@@ -48,9 +50,16 @@ def test_degradation_normal_partial_failsafe() -> None:
         controller.decide(10.0, PHASES, some_stale) == DegradationMode.PARTIAL
     )
 
+    # Between 1x and 2x timeout the feeds are stale (PARTIAL), not FAILSAFE.
     all_stale = {"P_N": 5.0, "P_E": 5.0, "P_S": 5.0, "P_W": 5.0}
     assert (
-        controller.decide(10.0, PHASES, all_stale) == DegradationMode.FAILSAFE
+        controller.decide(10.0, PHASES, all_stale) == DegradationMode.PARTIAL
+    )
+
+    # Beyond 2x timeout every feed is dead -> FAILSAFE (watchdog rule).
+    all_dead = {"P_N": 3.0, "P_E": 3.0, "P_S": 3.0, "P_W": 3.0}
+    assert (
+        controller.decide(10.0, PHASES, all_dead) == DegradationMode.FAILSAFE
     )
 
 

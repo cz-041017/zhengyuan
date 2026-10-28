@@ -3,7 +3,7 @@
 > 仓库地址：<https://github.com/cz-041017/zhengyuan>
 > 项目名（pyproject）：`smart-traffic-control`　版本：`0.1.0`
 > 语言 / 版本：Python ≥ 3.11（用 uv 管理依赖）
-> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），122 个单元测试全部通过
+> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），143 个单元测试全部通过
 >
 > 文档索引：算法设计 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)　·　感知层接口 [`docs/perception-interface.md`](docs/perception-interface.md)　·　可调参数 [`docs/parameter-reference.md`](docs/parameter-reference.md)　·　调试与复现 [`docs/debugging-guide.md`](docs/debugging-guide.md)
 
@@ -114,8 +114,8 @@
 > **关键设计**：P0 和 P1 走**预定义约束路径**，不是"把分数调大一点"。
 > 为什么？因为如果只靠加分，一个特别大的权重就可能盖过 P0。
 >
-> **诚实说明（重要）**：120s 在当前实现里是**尽力保证（best-effort）**，不是绝对硬保证——
-> ① 最小绿是比抢占更优先的硬下限，若某方向在最小绿走完前就到截止，实际等待会略超 120s；
+> **诚实说明（重要）**：130s 在当前实现里是**尽力保证（best-effort）**，不是绝对硬保证——
+> ① 最小绿是比抢占更优先的硬下限，若某方向在最小绿走完前就到截止，实际等待会略超 130s；
 > ② 当"到截止"与"下游拥堵"冲突（P0/P1 冲突）时，实现返回 `feasible=False` 且**不切换**，
 > 由上层上报 / 人工仲裁，而不是伪造一个相位强行放行。文档与实现均按此语义表述。
 
@@ -139,7 +139,7 @@
 
 ### 3.8 时序分析（`timing_analysis.py`）—— 提前算"最坏情况会不会超时"
 - 在部署前就算一遍：如果所有方向都在排队，最坏要等多久？
-- 用来验证"120 秒等待上限"**在结构上是否真的做得到**，而不是靠运气。
+- 用来验证"130 秒等待上限"**在结构上是否真的做得到**，而不是靠运气。
 
 ### 3.9 感知层接口（`perception.py`）—— 和"眼睛"对接的插座
 - 定义感知层该按什么格式传数据（车辆 ID、车道、时间戳、速度）。
@@ -150,6 +150,29 @@
   `DegradationController` + `FeedbackMonitor` + `PhaseStateMachine`（+ 相位/评分/状态机配置）。
 - 注意：`SafetyGuard`、`QueueEstimator`、`perception` **不在** `build_runtime` 的返回值里，
   它们由仿真台/上层自行构造与调用。
+
+### 3.11 行人保底（`state_machine.py` + `pedestrian.*`）—— 没车时也给行人留一次过街
+- 行人绿灯**绑定直行相位**：普通路口按“北→东、东→南、南→西、西→北”的顺时针相邻人行横道；
+  绿波主路按“南北直行放行东西两侧、南北左转 4 向全红、东向放北向、西向放南向”。
+- 某方向连续红灯达到 `pedestrian.max_red_s`（默认 150s）→ 给一次保底绿灯（默认 12s），
+  只放行“该方向直行 + 对应人行横道”，左转照常。
+- 优先级：**车辆 P0（130s）> 行人保底（150s）> 普通评分**；且保底不会把任何方向推过 130s。
+- 行人黄灯：车辆绿灯最后 `pedestrian.yellow_s`（默认 3s）由接口层驱动，
+  逻辑层通过 `LayerResult.active_crosswalks` / `pedestrian_yellow_remaining_s` 输出可用信息。
+
+### 3.12 数据看门狗（`degradation.py` + `telemetry.py`）—— 感知层“失联”就交权
+- 1× 超时（默认 3s）无数据 → `PARTIAL`（继续自适应，但等待按保守值算）。
+- 2× 超时（默认 6s）无数据 → `FAILSAFE`：逻辑层**主动交权**（`selected_phase_id=None,
+  reason="failsafe_hold"`），由信号机切固定配时/黄闪。
+- 告警通过 `TelemetrySink` 抽象接口上报（默认只写本地日志，**不接网络**；
+  后期由数据接口层转发上云）。
+
+### 3.13 指挥中心接管（`DecisionLayer.takeover/release`）—— 人接管时逻辑层闭嘴
+- 单路口接管：`layer.takeover(now)` 后该路口**完全静默**（`reason="manual_override"`），
+  其他路口不受影响。
+- 解除接管：`layer.release(now)` → **内存清零**（不重启进程）+ 走国标启动序列
+  （5s 黄闪 + 10s 红灯），序列结束后恢复正常决策。
+- 接管/解除指令协议由交警部门制定；逻辑层只认 `TAKEOVER(junction_id)` / `RELEASE(junction_id)` 两个信号。
 
 ---
 
@@ -170,6 +193,8 @@
 | [`perception.py`](src/traffic_control/perception.py) | 感知层输入边界 | `RawDetection`、`DownstreamReport`、`PerceptionFrame`、`normalize_detections`、`downstream_occupancy` |
 | [`runtime.py`](src/traffic_control/runtime.py) | 配置 → 运行时端到端装配 | `build_runtime`、`RuntimeObjects`、`build_phases` 等 |
 | [`decision_layer.py`](src/traffic_control/decision_layer.py) | **决策层门面**：一步串起排队→降级→溢流→状态机→反馈，并汇总全部可调参数 | `DecisionLayer`、`TunableParameters`、`LayerResult` |
+| [`telemetry.py`](src/traffic_control/telemetry.py) | 告警/日志输出**抽象接口**（只定义边界，不接网络，后期由数据接口层转发上云） | `TelemetrySink`、`NullTelemetrySink`、`AlarmEvent` |
+| [`startup.py`](src/traffic_control/startup.py) | 国标启动序列：5s 黄闪 + 10s 全红 | `StartupSequence`、`StartupStage` |
 
 ---
 
@@ -205,8 +230,10 @@ zhengyuan/
 │   ├── timing_analysis.py           # 最坏情况时序分析
 │   ├── perception.py                # 感知层接口边界
 │   ├── runtime.py                   # 配置 → 运行时装配
-│   └── decision_layer.py            # 决策层门面（一键调用 + 参数汇总）
-├── tests/                           # 11 个测试文件 / 122 个用例
+│   ├── decision_layer.py            # 决策层门面（一键调用 + 参数汇总）
+│   ├── telemetry.py                 # 告警/日志输出接口（不接网络）
+│   └── startup.py                   # 国标 5s 黄闪 + 10s 红灯启动序列
+├── tests/                           # 15 个测试文件 / 154 个用例
 ├── .gitignore
 ├── .python-version                  # 3.11
 ├── pyproject.toml                   # 依赖：pyyaml；dev：pytest
@@ -225,7 +252,7 @@ zhengyuan/
 git clone https://github.com/cz-041017/zhengyuan.git
 cd zhengyuan
 uv sync                                       # 按 uv.lock 创建虚拟环境并安装依赖
-uv run pytest                                 # 期望：122 passed（全部测试通过）
+uv run pytest                                 # 期望：154 passed（全部测试通过）
 uv run smart-traffic-control                  # 入口自检：打印 decision engine ready
 ```
 
@@ -243,7 +270,7 @@ runtime = build_runtime(load_config("configs/simulation.yaml"))
 # 2) 模拟当前状态：现在是主路直行相位 P_MT
 state = ControllerState(mode=ControllerMode.NORMAL, current_phase_id="P_MT", phase_started_at=0.0)
 
-# 3) 各方向的需求：西向已经等了 118 秒（接近 120s 上限！）
+# 3) 各方向的需求：西向已经等了 118 秒（接近 130s 上限！）
 demands = {
     "P_MT": PhaseDemand(green_wave_active=True),
     "P_W":  PhaseDemand(vehicle_count=6, oldest_wait_s=118.0),
@@ -304,7 +331,7 @@ print(decision.selected_phase_id)   # -> P_W（因为 P0 等待保障，触发�
 - [x] 最坏情况时序分析（`timing_analysis.py`）
 - [x] 感知层接口边界与文档（`perception.py`）
 - [x] 配置 → 运行时端到端装配（`runtime.py`）
-- [x] 122 个单元测试 + CLI 入口
+- [x] 143 个单元测试 + CLI 入口
 - [x] 磐安县真实路网仿真台（`panan/`，可视化演示 + 指标统计）
 
 ### 部分实现 / 未接线（重要，避免误读）

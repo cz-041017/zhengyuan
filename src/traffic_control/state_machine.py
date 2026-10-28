@@ -27,6 +27,14 @@ class MachineConfig:
     score_hysteresis: float = 0.1
     switch_debounce_s: float = 3.0
     countdown_duration_s: float = 15.0
+    # Pedestrian guarantee: a direction whose red has lasted this long gets one
+    # minimum green so its crosswalk users can cross. Fixed-time, no detection.
+    pedestrian_max_red_s: float = 150.0
+    pedestrian_min_green_s: float = 12.0
+    # A silence longer than this is a data gap: pedestrian red baselines are
+    # rebuilt from the recovery instant instead of trusting a possibly
+    # multi-switch-distant history.
+    data_gap_s: float = 6.0
 
     def __post_init__(self) -> None:
         if self.score_hysteresis < 0:
@@ -35,6 +43,12 @@ class MachineConfig:
             raise ValueError("switch_debounce_s must be non-negative")
         if self.countdown_duration_s <= 0:
             raise ValueError("countdown_duration_s must be positive")
+        if self.pedestrian_max_red_s <= 0:
+            raise ValueError("pedestrian_max_red_s must be positive")
+        if self.pedestrian_min_green_s < 0:
+            raise ValueError("pedestrian_min_green_s must be non-negative")
+        if self.data_gap_s <= 0:
+            raise ValueError("data_gap_s must be positive")
 
 
 @dataclass(frozen=True)
@@ -90,6 +104,10 @@ class PhaseStateMachine:
         self._countdown_started_at: float | None = None
         self._debounce_phase_id: str | None = None
         self._debounce_started_at: float | None = None
+        # Pedestrian guarantee bookkeeping.
+        self._started_at: float | None = None
+        self._last_green_end: dict[str, float] = {}
+        self._last_tick_at: float | None = None
 
     @property
     def stage(self) -> MachineStage:
@@ -109,6 +127,9 @@ class PhaseStateMachine:
         now: float,
         demands: Mapping[str, PhaseDemand],
     ) -> PhaseDecision:
+        if state.mode == ControllerMode.MANUAL_OVERRIDE:
+            self._clear_transient()
+            return PhaseDecision(None, "manual_override", feasible=True)
         if state.mode != ControllerMode.NORMAL:
             return PhaseDecision(None, "controller_not_normal", feasible=False)
 
@@ -123,7 +144,27 @@ class PhaseStateMachine:
         if elapsed < 0:
             return PhaseDecision(None, "invalid_phase_start_time", feasible=False)
 
+        if self._started_at is None:
+            self._started_at = now
+        if (
+            self._last_tick_at is not None
+            and now - self._last_tick_at > self._config.data_gap_s
+        ):
+            # Perception gap: past switch history may be wrong (the controller
+            # kept switching unobserved). Rebuild conservatively from ``now``
+            # so a stale baseline can never fire the guarantee early.
+            self._last_green_end.clear()
+            self._started_at = now
+        self._last_tick_at = now
         if self._last_current_phase != state.current_phase_id:
+            if self._last_current_phase is not None:
+                # The previous green ended when the *new* phase started, not
+                # when this layer happened to observe the switch. Using the
+                # controller-reported start avoids a red-timer rollback when
+                # perception frames are missing during the switch.
+                self._last_green_end[self._last_current_phase] = (
+                    state.phase_started_at
+                )
             self._last_current_phase = state.current_phase_id
             self._clear_transient()
 
@@ -210,6 +251,23 @@ class PhaseStateMachine:
                 feasible=True,
             )
 
+        # Pedestrian guarantee: a direction whose red has lasted at least
+        # ``pedestrian_max_red_s`` receives one green so its crosswalk users can
+        # cross. It yields to the P0 vehicle deadline above (120 s < 150 s), and
+        # it skips downstream-blocked directions so it never feeds spillback.
+        pedestrian_target = self._pedestrian_target(
+            red_phases, blocked, now, demands, deadline, time_to_green
+        )
+        if pedestrian_target is not None:
+            self._clear_transient()
+            return PhaseDecision(
+                pedestrian_target,
+                "pedestrian_guarantee",
+                scores=scores,
+                constraints_applied=("pedestrian_max_red",),
+                feasible=True,
+            )
+
         # Maximum green is a hard cap: terminate the current phase.
         if elapsed >= current.max_green_s:
             successor = self._best_candidate(red_phases, blocked, demands)
@@ -229,8 +287,8 @@ class PhaseStateMachine:
                     None,
                     "no_feasible_successor",
                     scores=scores,
-                    constraints_applied=("max_green",),
-                    feasible=True,
+                    constraints_applied=("max_green", "all_red_required"),
+                    feasible=False,
                 )
             return PhaseDecision(
                 successor,
@@ -278,7 +336,11 @@ class PhaseStateMachine:
         if best is None:
             self._clear_transient()
             return PhaseDecision(
-                None, "no_feasible_candidate", scores=scores, feasible=True
+                None,
+                "no_feasible_candidate",
+                scores=scores,
+                constraints_applied=("spillback",),
+                feasible=False,
             )
 
         if not self._score_exceeds(best, current, demands):
@@ -352,6 +414,79 @@ class PhaseStateMachine:
         candidate_score = self._phase_score(candidate, demands)
         current_score = self._phase_score(current.phase_id, demands)
         return candidate_score > current_score + self._config.score_hysteresis
+
+    def reset_transient(self) -> None:
+        """Drop an in-progress countdown/debounce without touching history.
+
+        Used when the layer is silenced (manual takeover): a stale pending
+        switch must not survive into the resumed session.
+        """
+        self._clear_transient()
+
+    def _red_duration(self, phase_id: str, now: float) -> float:
+        """How long ``phase_id`` has been red (since its last green ended).
+
+        A phase that never received green since the machine started is measured
+        from ``_started_at``. This is a conservative proxy: it can only make the
+        pedestrian guarantee fire earlier, never later, and it never treats a
+        missing record as "green just ended".
+        """
+        last = self._last_green_end.get(phase_id)
+        if last is None:
+            base = self._started_at if self._started_at is not None else now
+            return max(0.0, now - base)
+        return max(0.0, now - last)
+
+    def _pedestrian_target(
+        self,
+        red_phases: list[str],
+        blocked: set[str],
+        now: float,
+        demands: Mapping[str, PhaseDemand],
+        deadline: float,
+        time_to_green: float,
+    ) -> str | None:
+        """Pick the overdue direction with the longest red, if any.
+
+        Yields to the P0 vehicle deadline: if a pedestrian hold would push any
+        non-blocked red direction past ``deadline``, no guarantee is granted
+        this tick. This keeps the "P0 > pedestrian" ordering real, not just
+        declared.
+        """
+        overdue = [
+            phase_id
+            for phase_id in red_phases
+            if phase_id not in blocked
+            and self._red_duration(phase_id, now)
+            >= self._config.pedestrian_max_red_s
+        ]
+        if not overdue:
+            return None
+
+        # A pedestrian hold actually occupies the *candidate phase's* minimum
+        # green plus its clearance (yellow + all-red), not the global 12 s.
+        # Try candidates longest-red first; reject one whose hold would push
+        # any non-blocked red direction past the P0 deadline.
+        ordered = sorted(
+            overdue,
+            key=lambda pid: self._red_duration(pid, now),
+            reverse=True,
+        )
+        for candidate in ordered:
+            phase = self._phases[candidate]
+            if phase.min_green_s < self._config.pedestrian_min_green_s:
+                # Cannot guarantee the configured crossing time: skip it.
+                continue
+            hold = phase.min_green_s + phase.yellow_s + phase.all_red_s
+            overshoot = any(
+                demands.get(pid, PhaseDemand()).oldest_wait_s
+                >= deadline - time_to_green - hold
+                for pid in red_phases
+                if pid not in blocked
+            )
+            if not overshoot:
+                return candidate
+        return None
 
     def _clear_transient(self) -> None:
         self._pending_phase_id = None

@@ -31,7 +31,7 @@ def test_from_yaml_builds_and_exposes_parameters() -> None:
     layer = DecisionLayer.from_yaml(SIMULATION)
 
     params = layer.parameters
-    assert params.max_wait_target_s == 120.0
+    assert params.max_wait_target_s == 130.0
     assert params.observation_timeout_s == 3.0
     assert params.confirm_timeout_s == 10.0
     assert params.queue_speed_threshold_mps == 0.5
@@ -89,13 +89,13 @@ def test_tick_preempts_a_deadline_direction_from_observations() -> None:
     # All four approaches report, so no direction is "never seen".
     observations = [
         VehicleObservation(
-            track_id=1, lane_id="north_through", observed_at=119.0, speed_mps=0.0
+            track_id=1, lane_id="north_through", observed_at=129.0, speed_mps=0.0
         ),
         VehicleObservation(
-            track_id=2, lane_id="east_through", observed_at=119.0, speed_mps=0.0
+            track_id=2, lane_id="east_through", observed_at=129.0, speed_mps=0.0
         ),
         VehicleObservation(
-            track_id=3, lane_id="south_through", observed_at=119.0, speed_mps=0.0
+            track_id=3, lane_id="south_through", observed_at=129.0, speed_mps=0.0
         ),
         # The oldest vehicle on west_through arrived 120 s before now.
         VehicleObservation(
@@ -103,9 +103,9 @@ def test_tick_preempts_a_deadline_direction_from_observations() -> None:
         ),
     ]
 
-    result = layer.tick(now=120.0, state=state, observations=observations)
+    result = layer.tick(now=130.0, state=state, observations=observations)
 
-    assert result.demands["P_W"].oldest_wait_s == pytest.approx(120.0)
+    assert result.demands["P_W"].oldest_wait_s == pytest.approx(130.0)
     assert result.demands["P_N"].oldest_wait_s == pytest.approx(1.0)
     assert result.decision.selected_phase_id == "P_W"
     assert result.decision.reason == "p0_wait_preempt"
@@ -138,13 +138,13 @@ def test_stale_direction_keeps_ageing_and_is_eventually_served() -> None:
 
     # t=130: three approaches still report; west_through is gone (dead feed).
     result = layer.tick(
-        now=130.0,
-        state=make_state("P_N", 120.0),  # elapsed 10 s
+        now=140.0,
+        state=make_state("P_N", 110.0),  # elapsed 30 s (> 15 s min green)
         observations=[
             VehicleObservation(
                 track_id=10 + index,
                 lane_id=lane,
-                observed_at=129.0,
+                observed_at=139.0,
                 speed_mps=0.0,
             )
             for index, lane in enumerate(approaches[:3])
@@ -152,7 +152,7 @@ def test_stale_direction_keeps_ageing_and_is_eventually_served() -> None:
     )
 
     # Memory says west_through last reported at t=10 -> 120 s conservative wait.
-    assert result.demands["P_W"].oldest_wait_s == pytest.approx(120.0)
+    assert result.demands["P_W"].oldest_wait_s == pytest.approx(130.0)
     assert result.degradation == DegradationMode.PARTIAL
     assert result.decision.selected_phase_id == "P_W"
     assert result.decision.reason == "p0_wait_preempt"

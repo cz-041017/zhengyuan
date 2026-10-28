@@ -42,7 +42,7 @@ uv sync
 
 ```powershell
 uv run pytest -q
-# 期望输出：122 passed
+# 期望输出：143 passed
 
 uv run python --version
 # 期望：Python 3.11.x
@@ -150,9 +150,35 @@ uv run pytest tests/test_state_machine.py::test_p0_preempt_switches_immediately 
 | 三种降级模式 | `uv run pytest tests/test_degradation.py -v -k degradation` | `degradation.py` |
 | 保守等待（数据缺失） | `uv run pytest tests/test_degradation.py -v -k conservative` | `degradation.py` |
 | 执行反馈失败三态 | `uv run pytest tests/test_feedback.py -v` | `feedback.py` |
-| 120s 可行性/最坏等待 | `uv run pytest tests/test_timing_analysis.py -v` | `timing_analysis.py` |
+| 130s 可行性/最坏等待 | `uv run pytest tests/test_timing_analysis.py -v` | `timing_analysis.py` |
 | 感知层输入校验 | `uv run pytest tests/test_perception.py -v` | `perception.py` |
 | 端到端装配 + 决策 | `uv run pytest tests/test_runtime.py -v` | `runtime.py` |
+| 行人保底（无车方向 150s 给一次绿灯） | `uv run pytest tests/test_pedestrian.py -v` | `state_machine.py` |
+| 人行横道映射（普通/绿波三套） | `uv run pytest tests/test_pedestrian.py -v -k crosswalk` | `phasing.py` |
+| 数据看门狗（2× 超时 → FAILSAFE） | `uv run pytest tests/test_degradation.py -v -k failsafe` | `degradation.py` |
+| FAILSAFE 交权 | `uv run pytest tests/test_takeover.py -v -k failsafe` | `decision_layer.py` |
+| 单路口接管 / 解除 / 启动序列 | `uv run pytest tests/test_takeover.py -v` | `decision_layer.py` |
+| 行人保底不推过 P0 截止 | `uv run pytest tests/test_hardening2.py -v -k threshold` | `state_machine.py` |
+
+### 3.1 调试"行人保底 / 数据看门狗 / 指挥中心接管"
+
+**行人保底**：
+- 触发条件：某方向连续红灯 ≥ `pedestrian.max_red_s`（默认 150s），且保底不会把任何方向推过
+  `optimization.max_wait_target_s`（默认 130s）。
+- 看 `result.decision.reason == "pedestrian_guarantee"` 和 `result.active_crosswalks`。
+- 如果一直不触发：检查 `pedestrian.max_red_s > max_wait_target_s`（加载期强制）和
+  `pedestrian.min_green_s <= 相位最小绿`（加载期强制）。
+
+**数据看门狗**：
+- 1× 超时（3s）→ `PARTIAL`；2× 超时（6s）→ `FAILSAFE`。
+- FAILSAFE 时 `selected_phase_id=None, reason="failsafe_hold"`，且 `TelemetrySink` 收
+  `AlarmType.FAILSAFE`（CRITICAL）。
+- 用 `CollectingTelemetrySink` 收集告警，断言"只在模式变化时上报一次"。
+
+**指挥中心接管**：
+- `layer.takeover(now)` 后，`result.reason == "manual_override"`，`selected_phase_id is None`。
+- `layer.release(now)` 后进入启动序列：`result.startup` 为 `FLASH`（5s）→ `ALL_RED`（10s）→ `None`。
+- 解除接管会**内存清零**（`_last_seen` 清空、runtime 重建），不会带着旧计时恢复。
 
 ---
 
@@ -160,7 +186,7 @@ uv run pytest tests/test_state_machine.py::test_p0_preempt_switches_immediately 
 
 1. **改参数**：编辑 [`configs/`](../configs/) 下的 YAML（参数含义与建议见[参数手册](parameter-reference.md)）；
 2. **改完立即验证**：`uv run pytest -q`（配置校验会拦住非法值，例如优先级顺序、`o_low ≥ o_high`、`min_green > max_green`）；
-3. **检查 120s 是否结构可行**：
+3. **检查 130s 是否结构可行**：
 
 ```python
 from traffic_control.config_loader import load_config
@@ -169,13 +195,13 @@ from traffic_control.timing_analysis import analyze_timing
 
 runtime = build_runtime(load_config("configs/simulation.yaml"))
 a = analyze_timing(runtime.phases, runtime.score_config.max_wait_target_s)
-print("120s 可行：", a.feasible_120s)
+print("130s 可行：", a.feasible_120s)
 print("最大切换开销(s)：", a.max_time_to_green_s)
 print("无抢占最坏等待(s)：", a.worst_wait_s)
 print("依赖抢占的相位：", a.preempt_required)
 ```
 
-> 若 `preempt_required` 覆盖全部相位，说明最大绿配得过长，120s 全靠抢占兜底——应缩短最大绿，使 120s 成为**结构性保证**。
+> 若 `preempt_required` 覆盖全部相位，说明最大绿配得过长，130s 全靠抢占兜底——应缩短最大绿，使 130s 成为**结构性保证**。
 
 ---
 
@@ -189,7 +215,7 @@ print("依赖抢占的相位：", a.preempt_required)
 |---|---|---|
 | SUMO | 已安装（含 `sumo-gui`、`netconvert`、`duarouter`） | `sumo --version` |
 | SUMO Python 绑定 | 工具目录（默认 `/usr/share/sumo/tools`） | `ls /usr/share/sumo/tools/sumolib` |
-| 项目依赖 | 已 `uv sync`（或仓库自带 `.venv`） | `uv run pytest -q`（122 passed） |
+| 项目依赖 | 已 `uv sync`（或仓库自带 `.venv`） | `uv run pytest -q`（143 passed） |
 | 路网 | `panan/network/panan.net.xml`（磐安县手绘路网） | 已随仓库提供 |
 
 > 如果 SUMO 装在其他路径，用环境变量指定：`export SUMO_TOOLS=/你的/sumo/tools`。
