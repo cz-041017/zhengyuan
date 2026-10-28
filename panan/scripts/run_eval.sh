@@ -21,12 +21,14 @@ CTRL="${1:-adaptive}"
 END="${2:-3600}"
 REGEN="${3:-}"
 
-# 改过路网后：重新生成需求（seed=42，period=1.5 → 约 2400 车次/小时）
+# 改过路网后：重新生成需求（seed=42，period=1.5 → 约 2400 车次/小时 + 奉庆线 400 辆）
 if [ "$REGEN" = "regen" ] || [ ! -f panan/demand/panan_routes.rou.xml ]; then
   echo "==> 生成随机 OD 需求"
   python3 "$SUMO_TOOLS/randomTrips.py" -n panan/network/panan.net.xml \
     -o panan/demand/panan_trips.xml -e "$END" --period 1.5 --fringe-factor 5 --min-distance 300 --seed 42
-  duarouter -n panan/network/panan.net.xml -r panan/demand/panan_trips.xml \
+  echo "==> 生成奉庆线额外车流"
+  .venv/bin/python panan/scripts/gen_fengqing_flow.py --count 400 --out panan/demand/fengqing_trips.xml
+  duarouter -n panan/network/panan.net.xml -r panan/demand/panan_trips.xml,panan/demand/fengqing_trips.xml \
     -o panan/demand/panan_routes.rou.xml --seed 42 --ignore-errors
 fi
 

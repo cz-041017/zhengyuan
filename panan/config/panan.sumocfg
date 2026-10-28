@@ -3,6 +3,7 @@
     <input>
         <net-file value="../network/panan.net.xml"/>
         <route-files value="../demand/panan_routes.rou.xml"/>
+        <additional-files value="vtypes.add.xml"/>
     </input>
     <time>
         <begin value="0"/>

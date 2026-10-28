@@ -27,12 +27,14 @@ case "$MODE" in
   gif)    GIF="panan/results/demo.gif"; END="180"; [ "$MODE2" = "fixed" ] && CTRL="fixed";;
 esac
 
-# 若需求文件不存在，先生成随机 OD 需求（seed=42）
+# 若需求文件不存在，先生成随机 OD 需求（seed=42）+ 奉庆线额外车流
 if [ ! -f panan/demand/panan_routes.rou.xml ]; then
   echo "==> 生成随机 OD 需求"
   python3 "$SUMO_TOOLS/randomTrips.py" -n panan/network/panan.net.xml \
     -o panan/demand/panan_trips.xml -e 3600 --period 1.5 --fringe-factor 5 --min-distance 300 --seed 42
-  duarouter -n panan/network/panan.net.xml -r panan/demand/panan_trips.xml \
+  echo "==> 生成奉庆线额外车流"
+  .venv/bin/python panan/scripts/gen_fengqing_flow.py --count 400 --out panan/demand/fengqing_trips.xml
+  duarouter -n panan/network/panan.net.xml -r panan/demand/panan_trips.xml,panan/demand/fengqing_trips.xml \
     -o panan/demand/panan_routes.rou.xml --seed 42 --ignore-errors
 fi
 

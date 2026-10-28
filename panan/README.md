@@ -126,3 +126,8 @@ bash panan/scripts/build_net.sh   # 去辅助道路 + 选干净交叉口(间距�
 - **只控信号灯路口**：OSM/net 中 `traffic_light` 节点才交给决策层，其余保持 SUMO 默认（优先/环岛）。
 - **指标**：理论最大承载车流（车道数×1800 veh/h）、实际通过车流、平均通过路口时间（停止线 60m 检测区）、
   平均等待时间。
+  
+ ## 一键运行仿真验证
+  cd /home/ubuntu/zhengyuan
+bash panan/scripts/run_demo.sh
+

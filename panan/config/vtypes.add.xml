@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 拟真起步延时：覆盖默认车辆类型参数。
+     accel 降低 -> 起步加速更缓；sigma 增大 -> 驾驶员反应时间更长；
+     tau 增大 -> 后车跟随延迟更长。绿灯亮起后车辆逐辆缓慢起步。 -->
+<additional>
+    <vType id="DEFAULT_VEHTYPE" accel="1.2" decel="3.5" sigma="1.0" tau="1.5"
+           length="5.0" minGap="2.5" maxSpeed="14.0" speedFactor="normc(1.0,0.1,0.8,1.2)"/>
+</additional>
