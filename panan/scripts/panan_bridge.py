@@ -62,6 +62,7 @@ class JunctionTopo:
     edge_approach: dict[str, str] = field(default_factory=dict)      # edge -> 来向
     approach_edges: dict[str, list[str]] = field(default_factory=dict)  # 来向 -> [edge]
     conn_dir: dict[tuple[str, str], str] = field(default_factory=dict)
+    lane_dir: dict[tuple[str, str], str] = field(default_factory=dict)  # (in_lane,out_lane)->direction
     downstream: dict[str, dict[str, str]] = field(default_factory=dict)  # 来向 -> {through,left}
     incoming_lanes: int = 0
 
@@ -101,8 +102,11 @@ class NetInfo:
             for conn in node.getConnections():
                 in_edge = conn.getFrom().getID()
                 out_edge = conn.getTo().getID()
+                in_lane = conn.getFromLane().getID()
+                out_lane = conn.getToLane().getID()
                 d = conn.getDirection()
                 topo.conn_dir[(in_edge, out_edge)] = d
+                topo.lane_dir[(in_lane, out_lane)] = d
                 appr = topo.edge_approach[in_edge]
                 if d == "s":
                     topo.downstream.setdefault(appr, {})["through"] = out_edge
@@ -191,6 +195,7 @@ class JunctionController:
     safety: SafetyGuard
     state: ControllerState
     link_approach: list[str]                # 与 TLS 状态串对齐
+    link_right: list[bool] = field(default_factory=list)  # 与 link_approach 对齐，标记右转 link
     clearance: dict[str, Any] | None = None
     # 统计
     switches: int = 0
@@ -203,13 +208,15 @@ class JunctionController:
 
     def apply_tls(self, traci: Any, mode: str, phase_id: str | None) -> None:
         if mode == "all_red":
-            s = "r" * len(self.link_approach)
+            base = ["r"] * len(self.link_approach)
         elif mode == "yellow":
             appr = self.phase_approach[phase_id]
-            s = "".join("y" if a == appr else "r" for a in self.link_approach)
+            base = ["y" if a == appr else "r" for a in self.link_approach]
         else:
             appr = self.phase_approach[phase_id]
-            s = "".join("G" if a == appr else "r" for a in self.link_approach)
+            base = ["G" if a == appr else "r" for a in self.link_approach]
+        # 右转 link 始终 'g'（让行绿灯），不受红灯控制
+        s = "".join("g" if right else b for b, right in zip(base, self.link_right))
         traci.trafficlight.setRedYellowGreenState(self.junction_id, s)
 
 
@@ -298,12 +305,16 @@ class Simulation:
 
             links = traci.trafficlight.getControlledLinks(jid)
             link_approach: list[str] = []
+            link_right: list[bool] = []
             for link in links:
                 if not link or len(link[0]) < 3:
                     # 退化 link（空元组/内联占位）：标记 'X'，永远显示红灯
                     link_approach.append("X")
+                    link_right.append(False)
                     continue
                 in_lane, out_lane, _ = link[0]
+                d = topo.lane_dir.get((in_lane, out_lane), "")
+                link_right.append(d in ("r", "R"))
                 in_edge = in_lane.rsplit("_", 1)[0]
                 appr = topo.edge_approach.get(in_edge)
                 if appr is None:
@@ -343,6 +354,7 @@ class Simulation:
                 safety=guard,
                 state=ControllerState(ControllerMode.NORMAL, initial, -20.0),
                 link_approach=link_approach,
+                link_right=link_right,
             )
             self.controllers[jid].apply_tls(traci, "green", initial)
 
