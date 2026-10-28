@@ -82,6 +82,10 @@
 | `green_wave.band_start_s` / `band_end_s` | 0 / 45 | 绿波窗口（相位周期内起止） | 按上游路口协调相位对齐 |
 | `green_wave.period_s` | 120 | 绿波周期（s） | 与信号周期一致 |
 
+> **实现状态（重要）**：这 5 个绿波参数**只被 `config_loader.py` 校验，运行时从未读取**
+> （`runtime.build_runtime` 不消费、仿真台硬编码 `green_wave_active=False`）。
+> 因此当前改这些参数**不会让绿波生效**，P2 绿波尚未接入。
+
 ## 7. 倒数（`countdown`）
 
 | 参数 | 默认 | 含义 | 调参建议 |
