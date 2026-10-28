@@ -60,8 +60,8 @@ def test_p0_preempt_switches_immediately() -> None:
     machine = make_machine()
     state = make_state("NS", 0.0)
     # At now=12 the minimum green (10) has elapsed, so the deadline is
-    # 120 - (0 remaining min green + 4 clearance) = 116. wait 117 preempts.
-    demands = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=117.0)}
+    # 130 - (0 remaining min green + 4 clearance) = 126. wait 127 preempts.
+    demands = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=127.0)}
 
     decision = machine.tick(state, 12.0, demands)
 

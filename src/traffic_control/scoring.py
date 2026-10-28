@@ -13,7 +13,7 @@ class ScoreConfig:
     and minimum/maximum green live on the audited signal phases, not here.
     """
 
-    max_wait_target_s: float = 120.0
+    max_wait_target_s: float = 130.0
     wait_urgency_start_s: float = 80.0
     wait_urgency_max_score: float = 5.0
     green_wave_score: float = 2.0

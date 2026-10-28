@@ -149,7 +149,7 @@ S(p) = S_demand(p) + S_gw(p) + S_wait(p) + S_spill(p)
 |---|---|---|---|
 | S_demand（P3 需求） | `0.6·min(N/N_max,1) + 0.4·min(W/D,1)`，N_max=20 | [0, 1] | P3 |
 | S_gw（P2 绿波） | 主路直行相位处于绿波窗口内时 `+2.0`，否则 0 | {0, +2.0} | P2 |
-| S_wait（P0 软预警） | `5.0 · clip((W − 80)/40, 0, 1)²` | [0, +5.0] | P0 |
+| S_wait（P0 软预警） | `5.0 · clip((W − 80)/50, 0, 1)²` | [0, +5.0] | P0 |
 | S_spill（P1 硬压制） | 任一下游方向拥堵时 `−1000`，否则 0 | {0, −1000} | P1 |
 
 ### 3.3 四项优先级的具体机制（含"为什么"）
@@ -157,7 +157,7 @@ S(p) = S_demand(p) + S_gw(p) + S_wait(p) + S_spill(p)
 **P0 —— 单方向等待时间尽量不超过 130s（最高，尽力保证 best-effort）**
 
 - **计时**：感知层返回该方向等待车辆 ≥1 辆时开始累计 `W`。
-- **软预警**：`W ∈ [80, 120)` 时 S_wait 二次爬升，使其在分数上**先于绿波**胜出（S_wait 最大 +5 > S_gw +2）。
+- **软预警**：`W ∈ [80, 130)` 时 S_wait 二次爬升，使其在分数上**先于绿波**胜出（S_wait 最大 +5 > S_gw +2）。
 - **截止抢占（关键）**：当 `W ≥ D − (max(0, T_min_green_当前 − 已绿时长) + T_yellow + T_all_red)`，
   即"剩余时间不足以让当前相位走完剩余最小绿、再完成黄灯/全红清空"时，**不走评分、不经 15s 倒数**，
   直接调度该方向（当前相位走完最小绿后立即清空切换）。
@@ -402,7 +402,7 @@ green_wave:
   band_end_s: 45.0
   period_s: 120.0
 optimization:
-  max_wait_target_s: 120.0                # P0 硬指标
+  max_wait_target_s: 130.0                # P0 硬指标
   wait_urgency_start_s: 80.0              # S_wait 起点
   wait_urgency_max_score: 5.0             # S_wait 峰值
   green_wave_score: 2.0                   # P2 绿波加分

@@ -57,14 +57,19 @@ def make_machine(**overrides) -> PhaseStateMachine:
 
 # -- S1: data gap with multiple unobserved switches ------------------------
 def test_data_gap_rebuilds_baseline_and_does_not_fire_early() -> None:
+    """A long gap must not be counted as pedestrian waiting time.
+
+    Without the rebuild the P_N baseline would be t=0 and at t=181 it would look
+    like 181 s of red (>= 150) and fire the guarantee. With the rebuild the
+    baseline is t=180, so nothing is overdue.
+    """
     machine = make_machine()
     machine.tick(st("P_N", 0.0), 0.0, {})
-    machine.tick(st("P_E", 0.0), 10.0, {})
-    # 80 s gap, during which the controller switched again (P_W started at 80).
-    machine.tick(st("P_W", 80.0), 90.0, {})
+    # 181 s gap; the controller switched unobserved (P_W started at 160, so its
+    # elapsed green is >= min green and the min-green guard does not mask this).
+    machine.tick(st("P_W", 160.0), 181.0, {})
 
-    # Right after recovery nothing is overdue (baseline rebuilt at t=90).
-    decision = machine.tick(st("P_W", 80.0), 95.0, {})
+    decision = machine.tick(st("P_W", 160.0), 182.0, {})
     assert decision.reason != "pedestrian_guarantee"
 
 
@@ -155,8 +160,8 @@ def test_no_feasible_alarm_is_emitted() -> None:
             "west_through": 1.0,
         },
     )
-    if result.decision.feasible is False:
-        assert any(a.alarm_type is AlarmType.NO_FEASIBLE_PHASE for a in sink.alarms)
+    assert result.decision.feasible is False
+    assert any(a.alarm_type is AlarmType.NO_FEASIBLE_PHASE for a in sink.alarms)
 
 
 # -- S4: manual gap must not produce a false FAILURE ----------------------
@@ -260,3 +265,10 @@ def test_pedestrian_yellow_remaining_window() -> None:
     assert r135.pedestrian_yellow_remaining_s == pytest.approx(1.5)
     r15 = layer.tick(15.0, st("P_N", 0.0), observations=fresh(15.0))
     assert r15.pedestrian_yellow_remaining_s == pytest.approx(0.0)
+
+
+def test_score_config_default_max_wait_target_is_130() -> None:
+    """Code default must match the documented 130 s P0 deadline."""
+    from traffic_control.scoring import ScoreConfig
+
+    assert ScoreConfig().max_wait_target_s == 130.0

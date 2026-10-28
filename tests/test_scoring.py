@@ -19,10 +19,10 @@ def test_demand_score_bounds_and_weights() -> None:
     assert scorer.demand_score(0, 0.0) == pytest.approx(0.0)
 
     # Full vehicle queue and full wait saturate to 1.0.
-    assert scorer.demand_score(20, 120.0) == pytest.approx(1.0)
+    assert scorer.demand_score(20, 130.0) == pytest.approx(1.0)
 
     # Half queue (10/20) and half wait (60/120) -> 0.6*0.5 + 0.4*0.5 = 0.5
-    assert scorer.demand_score(10, 60.0) == pytest.approx(0.5)
+    assert scorer.demand_score(10, 65.0) == pytest.approx(0.5)
 
 
 def test_demand_score_clips_above_saturation() -> None:
@@ -41,10 +41,10 @@ def test_wait_urgency_ramp() -> None:
 
     assert scorer.wait_urgency_score(79.0) == pytest.approx(0.0)
     assert scorer.wait_urgency_score(80.0) == pytest.approx(0.0)
-    # At 100s, x = 0.5, quadratic -> 5.0 * 0.25 = 1.25
-    assert scorer.wait_urgency_score(100.0) == pytest.approx(1.25)
-    # At 120s, x = 1.0 -> 5.0
-    assert scorer.wait_urgency_score(120.0) == pytest.approx(5.0)
+    # At 105s, x = (105-80)/(130-80) = 0.5 -> 5.0 * 0.25 = 1.25
+    assert scorer.wait_urgency_score(105.0) == pytest.approx(1.25)
+    # At 130s, x = 1.0 -> 5.0
+    assert scorer.wait_urgency_score(130.0) == pytest.approx(5.0)
     # Clips past the deadline.
     assert scorer.wait_urgency_score(200.0) == pytest.approx(5.0)
 

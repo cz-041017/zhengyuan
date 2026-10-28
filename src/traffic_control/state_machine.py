@@ -253,7 +253,7 @@ class PhaseStateMachine:
 
         # Pedestrian guarantee: a direction whose red has lasted at least
         # ``pedestrian_max_red_s`` receives one green so its crosswalk users can
-        # cross. It yields to the P0 vehicle deadline above (120 s < 150 s), and
+        # cross. It yields to the P0 vehicle deadline above (130 s < 150 s), and
         # it skips downstream-blocked directions so it never feeds spillback.
         pedestrian_target = self._pedestrian_target(
             red_phases, blocked, now, demands, deadline, time_to_green

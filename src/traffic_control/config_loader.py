@@ -208,7 +208,7 @@ def validate_config(config: dict[str, Any]) -> None:
     # Ordering guard: the pedestrian limit must be looser than the vehicle
     # deadline, otherwise the guarantee would preempt normal scoring forever.
     if pedestrian.get("max_red_s", 150.0) <= optimization.get(
-        "max_wait_target_s", 120.0
+        "max_wait_target_s", 130.0
     ):
         raise ConfigError(
             "pedestrian.max_red_s must be greater than "
