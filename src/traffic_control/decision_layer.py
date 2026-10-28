@@ -77,8 +77,15 @@ class LayerResult:
     # The interface layer drives pedestrian lamps from this set.
     active_crosswalks: frozenset[str] = frozenset()
     # Remaining seconds of the pedestrian-yellow window (0 = not yellow).
-    # Derived from the phase's minimum green: the last ``pedestrian.yellow_s``
-    # seconds of green forbid new pedestrians from entering.
+    #
+    # CONTRACT: this value is anchored to the phase's MINIMUM green (the last
+    # ``pedestrian.yellow_s`` seconds of it). It is only a lower-bound anchor
+    # because the decision layer does NOT know when the real green ends: the
+    # green may extend to ``max_green`` or be cut short by P0 preemption.
+    # The interface layer MUST recompute the pedestrian yellow from the actual
+    # remaining green time it is executing, using ``pedestrian.yellow_s`` as
+    # the window length. Do not drive the pedestrian lamps from this field
+    # directly when the real green can differ from the minimum green.
     pedestrian_yellow_remaining_s: float = 0.0
 
 
