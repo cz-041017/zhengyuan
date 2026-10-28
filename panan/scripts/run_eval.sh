@@ -25,9 +25,9 @@ REGEN="${3:-}"
 if [ "$REGEN" = "regen" ] || [ ! -f panan/demand/panan_routes.rou.xml ] || [ panan/network/panan.net.xml -nt panan/demand/panan_routes.rou.xml ]; then
   echo "==> 生成随机 OD 需求（路网已变更或需求缺失）"
   python3 "$SUMO_TOOLS/randomTrips.py" -n panan/network/panan.net.xml \
-    -o panan/demand/panan_trips.xml -e "$END" --period 1.2 --fringe-factor 5 --min-distance 300 --seed 42
+    -o panan/demand/panan_trips.xml -e "$END" --period 1.8 --fringe-factor 5 --min-distance 300 --seed 42
   echo "==> 生成奉庆线额外车流（含奉庆线→E10方向）"
-  .venv/bin/python panan/scripts/gen_fengqing_flow.py --count 500 --to-e10 400 --out panan/demand/fengqing_trips.xml
+  .venv/bin/python panan/scripts/gen_fengqing_flow.py --count 300 --to-e10 250 --out panan/demand/fengqing_trips.xml
   .venv/bin/python panan/scripts/merge_trips.py panan/demand/panan_all_trips.xml \
     panan/demand/panan_trips.xml panan/demand/fengqing_trips.xml
   duarouter -n panan/network/panan.net.xml -r panan/demand/panan_all_trips.xml \
