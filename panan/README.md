@@ -129,15 +129,19 @@ bash panan/scripts/build_net.sh   # 去辅助道路 + 选干净交叉口(间距�
 
 ## 演示定制（给甲方演示）
 
-- **奉庆线车流注入**：`gen_fengqing_flow.py` 生成 400 辆从「奉庆线」驶入路口
-  `cluster_4178171527_...` 的车辆（奉庆线驶入边 `787068627#2`）。
+- **奉庆线车流注入**：`gen_fengqing_flow.py` 生成 500 辆常规奉庆线流量（终点随机）。
+- **奉庆线 → E10 专项车流**：再生成 400 辆从奉庆线穿过路口、往 **E10/月山路方向**（`-E10.29`）的车辆，
+  两类车流都在 0-3600s 均匀分布、互相错开。
+- **整体车流**：`randomTrips --period 1.2`（约 3000 车次/小时），比之前 1.5 更密。
 - **起步延时**：`config/vtypes.add.xml` 覆盖默认车辆参数（`accel=1.2 / sigma=1.0 / tau=1.5`），
   绿灯后车辆逐辆缓慢起步。
+- **时间流速**：`run_demo.sh` 默认 `--delay-ms 250`（约 4 倍速），比原来 100ms 慢，更适合演示。
+- **需求排序**：`merge_trips.py` 合并多个 trip 文件并按 `depart` 排序（否则乱序车辆会被 SUMO 丢弃）。
 
 ## 一键运行仿真验证
 
 ```bash
 cd /home/ubuntu/zhengyuan
-bash panan/scripts/run_demo.sh
+bash panan/scripts/run_demo.sh          # 实时窗口演示（delay 250ms，更接近现实）
 ```
 
