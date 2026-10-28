@@ -1,21 +1,22 @@
-# 调试与复现手册
+# 调试与复现手册（含一键仿真教程）
 
-> 面向：本项目的开发者 / 联调同事。
-> 目标：**从零复现环境**、跑通决策层、**复现各类算法行为**、排查常见故障。
+> 面向：本项目的开发者 / 联调同事 / 演示人员。
+> 目标：**从零复现环境 → 跑通决策层 → 复现各类算法行为 → 一键开启仿真演示 → 排查常见故障**。
 > 相关文档：算法设计 [`decision-algorithm-design.md`](decision-algorithm-design.md)　·　可调参数 [`parameter-reference.md`](parameter-reference.md)　·　感知层接口 [`perception-interface.md`](perception-interface.md)
 
 ---
 
-## 1. 环境复现（从零开始）
+## 1. 环境复现（从零开始，按步骤做）
 
 ### 1.1 前置要求
 
-| 项 | 要求 |
-|---|---|
-| 操作系统 | Windows / Linux / macOS 均可 |
-| Python | **3.11**（由 uv 自动安装，无需手动装） |
-| git | 任意近期版本 |
-| uv | 必需（依赖与 Python 版本由它管理） |
+| 项 | 要求 | 说明 |
+|---|---|---|
+| 操作系统 | Windows / Linux / macOS 均可 | 仿真台（第 5 节）建议在 Linux 或 Windows 桌面 |
+| Python | **3.11**（由 uv 自动安装，无需手动装） | 逻辑层依赖 |
+| git | 任意近期版本 | 拉代码 |
+| uv | 必需 | 依赖与 Python 版本由它管理 |
+| SUMO | **仅在跑仿真台时需要**（第 5 节） | 逻辑层单元测试不需要 SUMO |
 
 安装 uv：
 
@@ -37,11 +38,11 @@ uv sync
 
 `uv sync` 会：读取 [`.python-version`](../.python-version)（3.11）→ 必要时下载 Python → 在项目内创建 `.venv` → 严格按 [`uv.lock`](../uv.lock) 安装锁定版本依赖。
 
-### 1.3 验证复现成功
+### 1.3 验证复现成功（三步）
 
 ```powershell
 uv run pytest -q
-# 期望输出：100 passed
+# 期望输出：102 passed
 
 uv run python --version
 # 期望：Python 3.11.x
@@ -102,10 +103,11 @@ print("可行：", decision.feasible)
 | `no_feasible_candidate` / `no_feasible_successor` | 所有候选被下游拥堵排除 |
 | `p0_p1_conflict` | **P0 与 P1 冲突**：截止方向下游又拥堵 → `feasible=False`，需上报仲裁 |
 | `controller_not_normal` / `unknown_current_phase` | 状态非法（故障/清空/未知相位） |
+| `invalid_phase_start_time` | 相位开始时间晚于当前时间（状态时间戳非法） |
 
 ---
 
-## 3. 复现各类算法行为
+## 3. 复现各类算法行为（按测试用例逐条复现）
 
 最直接的方式是**跑对应的单元测试**（每个行为都有独立用例）：
 
@@ -135,7 +137,7 @@ uv run pytest tests/test_state_machine.py::test_p0_preempt_switches_immediately 
 
 ---
 
-## 4. 调参与验证
+## 4. 调参与验证（按步骤）
 
 1. **改参数**：编辑 [`configs/`](../configs/) 下的 YAML（参数含义与建议见[参数手册](parameter-reference.md)）；
 2. **改完立即验证**：`uv run pytest -q`（配置校验会拦住非法值，例如优先级顺序、`o_low ≥ o_high`、`min_green > max_green`）；
@@ -158,15 +160,100 @@ print("依赖抢占的相位：", a.preempt_required)
 
 ---
 
-## 5. 常见问题排查（Troubleshooting）
+## 5. 一键开启仿真（可视化演示）
 
-### 5.1 命令一执行就崩溃，退出码 `0xC0000142`
+> 这一节是**给甲方演示 / 现场展示**用的完整教程，按步骤做即可。
+
+### 5.1 前置条件（只需装一次）
+
+| 项 | 要求 | 检查命令 |
+|---|---|---|
+| SUMO | 已安装（含 `sumo-gui`、`netconvert`、`duarouter`） | `sumo --version` |
+| SUMO Python 绑定 | 工具目录（默认 `/usr/share/sumo/tools`） | `ls /usr/share/sumo/tools/sumolib` |
+| 项目依赖 | 已 `uv sync`（或仓库自带 `.venv`） | `uv run pytest -q`（102 passed） |
+| 路网 | `panan/network/panan.net.xml`（磐安县手绘路网） | 已随仓库提供 |
+
+> 如果 SUMO 装在其他路径，用环境变量指定：`export SUMO_TOOLS=/你的/sumo/tools`。
+>
+> **平台说明**：一键脚本（`run_demo.sh` / `run_eval.sh`）是 **bash 脚本**，依赖 Linux 路径
+> （`.venv/bin/python`、`/usr/share/sumo/tools`、`pkill`）。Windows 下请用 **WSL** 或 **Git Bash**，
+> 并确认 SUMO 的 Linux 版（或 WSL 内的 SUMO）可用；纯 Windows 原生 PowerShell 下这些脚本不能直接运行。
+
+### 5.2 一键运行（最常用）
+
+```bash
+cd zhengyuan
+bash panan/scripts/run_demo.sh
+```
+
+**它会自动完成：**
+
+1. 检查需求文件（`panan/demand/panan_routes.rou.xml`），
+   不存在或**路网比需求新**（你刚用 netedit 改过路网）→ 自动重新生成需求；
+2. 打开 `sumo-gui`，用**逻辑决策层实时控制 43 个信号灯路口**；
+3. 长时间运行（默认 86400s 仿真时间），**随时可关闭窗口停止**；
+   > 注意：需求文件默认只生成到 **3600s**（`randomTrips -e 3600`），所以 3600s 之后路网会逐渐没车。
+   > 若要长跑持续有车，把 `run_demo.sh` / `run_eval.sh` 里的 `-e 3600`（以及 `gen_fengqing_flow.py --end`）调大。
+4. 窗口里可**鼠标滚轮放大 / 拖动**，逐个路口查看红绿灯切换和排队。
+
+### 5.3 一键脚本的各种用法
+
+| 命令 | 效果 |
+|---|---|
+| `bash panan/scripts/run_demo.sh` | 实时窗口，**自适应决策层**控灯（默认） |
+| `bash panan/scripts/run_demo.sh fixed` | 实时窗口，**固定配时**对照（30s 轮换） |
+| `bash panan/scripts/run_demo.sh gif` | 生成 GIF 动画，输出 `panan/results/demo.gif`（**仍需 sumo-gui 能启动**：无显示器时请用 `xvfb-run` 或确保 `DISPLAY` 可用） |
+| `bash panan/scripts/run_demo.sh gif fixed` | 固定配时的 GIF |
+| `bash panan/scripts/run_eval.sh adaptive` | **指标评估**（无界面），4 项指标追加到 `panan/results/metrics.csv` |
+| `bash panan/scripts/run_eval.sh fixed` | 固定配时指标评估 |
+| `bash panan/scripts/run_eval.sh adaptive 3600 regen` | 强制重新生成需求再评估 |
+
+### 5.4 演示参数怎么调
+
+| 想调整的 | 改哪里 | 说明 |
+|---|---|---|
+| **仿真跑多快**（时间流速） | `run_demo.sh` 的 `DELAY` | 默认 250（约 4 倍速）；500=2 倍速；1000=1 倍速（真实时间） |
+| **跑多久** | `run_demo.sh` 的 `END` | 实时窗口默认 86400（手动关窗停止） |
+| **整体车流密度** | `run_demo.sh` 里 `randomTrips --period` | 1.2 密 / 1.8 中等（默认）/ 2.5 稀疏 |
+| **奉庆线车流** | `run_demo.sh` 里 `--count`（常规）/ `--to-e10`（往 E10 方向） | 脚本传参 300 / 250（`gen_fengqing_flow.py` 自身默认是 500 / 400） |
+| **车辆起步快慢** | `panan/config/vtypes.add.xml` | `accel`（加速度）、`sigma`（反应延迟）、`tau`（跟车时距） |
+| **相位检查** | `PYTHONPATH=/usr/share/sumo/tools .venv/bin/python panan/scripts/inspect_phases.py` | 打印每个路口的相位分组，标出被合并的路口（需 sumolib，故要设 PYTHONPATH） |
+
+### 5.5 指标评估（给甲方看数据）
+
+```bash
+bash panan/scripts/run_eval.sh adaptive
+```
+
+每跑一次，自动把一行结果追加到 `panan/results/metrics.csv`：
+
+| 列 | 含义 |
+|---|---|
+| `avg_delay_s` | **平均车均延误**（每辆车平均多花了多少秒） |
+| `avg_queue_veh` | **平均排队长度**（信号灯进口道平均停着几辆车） |
+| `capacity_veh_per_h` | **通行能力**（实测每小时通过多少辆） |
+| `conflicts` | **冲突/碰撞累计值**（每仿真步累加 `getCollidingVehiclesNumber()`，即"涉碰撞车辆数"之和，不是去重后的碰撞次数；0 表示全程无碰撞） |
+
+### 5.6 常见演示问题
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 打开窗口后车辆不动 | 需求文件缺失 / 路网被改过 | 删掉 `panan/demand/panan_routes.rou.xml` 重跑，或加 `regen` |
+| 车辆卡在某个路口前不动 | 改过路网（拆分/合并边）但需求没更新 | 同上（需求与路网边长不匹配） |
+| GIF 生成失败 | 无图形环境 | 用 `run_demo.sh gif`（离屏），不要用实时窗口 |
+| 窗口关不掉 / 卡住 | 无显示器时 sumo-gui 阻塞 | 用 `gif` 模式，或 `pkill -9 -x sumo-gui` |
+
+---
+
+## 6. 常见问题排查（Troubleshooting）
+
+### 6.1 命令一执行就崩溃，退出码 `0xC0000142`
 
 - **现象**：任何命令都启动失败（DLL 初始化失败），连 `git --version` 都跑不了。
 - **原因**：**运行环境处于受限沙箱模式**（不是代码问题，也不是 git/uv 装坏了）。
 - **处理**：把当前会话 / 终端切到**完全权限（full access）**模式即可恢复正常。若在 CI 或容器里遇到，检查是否有安全策略限制进程创建。
 
-### 5.2 `git` 或 `uv` 提示「无法将...识别为 cmdlet/命令」
+### 6.2 `git` 或 `uv` 提示「无法将...识别为 cmdlet/命令」
 
 - **原因**：新起的 PowerShell 进程没有合并「用户级 PATH」，而 uv 装在 `%USERPROFILE%\.local\bin`。
 - **处理**（当前会话临时修复）：
@@ -177,7 +264,7 @@ $env:PATH = [Environment]::GetEnvironmentVariable('PATH','Machine') + ';' + [Env
 
 - **永久修复**：重开一个终端（新终端会读到已写入的用户 PATH）。
 
-### 5.3 无法运行 `.ps1` 脚本（"禁止运行脚本"）
+### 6.3 无法运行 `.ps1` 脚本（"禁止运行脚本"）
 
 - **现象**：`无法加载文件 ... 因为在此系统上禁止运行脚本`。
 - **处理**：临时绕过或调整当前用户策略：
@@ -190,14 +277,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\some-script.ps1
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-### 5.4 `uv sync` 报依赖与 `uv.lock` 不一致
+### 6.4 `uv sync` 报依赖与 `uv.lock` 不一致
 
 ```powershell
 uv sync            # 按锁文件对齐
 uv lock --upgrade  # 仅在确认要升级依赖时使用（会改动 uv.lock，需 review）
 ```
 
-### 5.5 测试失败怎么定位
+### 6.5 测试失败怎么定位
 
 ```powershell
 uv run pytest -q                       # 先看总体
@@ -207,13 +294,13 @@ uv run pytest tests/test_state_machine.py::用例名 -vv   # 精确定位
 
 多数失败来自**配置被改坏**（`ConfigError` 会在信息里指出具体字段），先核对 `configs/*.yaml`。
 
-### 5.6 Git 提示 `LF will be replaced by CRLF`
+### 6.6 Git 提示 `LF will be replaced by CRLF`
 
 Windows 下 `core.autocrlf=true` 的正常提示，**不影响内容**，可忽略。
 
 ---
 
-## 6. 提交与发布
+## 7. 提交与发布
 
 ```powershell
 git add -A
@@ -227,8 +314,8 @@ git push origin main
 
 ---
 
-## 7. 尚未实现（调试时请注意）
+## 8. 尚未实现（调试时请注意）
 
-- **仿真台**尚未实现：目前没有「按时间推进的控制器执行模型 + 车流到达生成 + 主循环 + 指标统计」。因此 `configs/simulation.yaml` 里的 `simulation:` 段（`duration_s` / `step_s` / `random_seed`）**当前尚未被任何代码消费**。
-  - 现阶段验证算法行为，请走**单元测试**（第 3 节）或**手动 tick**（第 2 节）。
 - **控制接口层**（GB/T 20999）与 **PLC / 仿真器接入**尚未实现，`PhaseDecision` 暂不落到真实设备。
+- `configs/simulation.yaml` 里的 `simulation:` 段（`duration_s` / `step_s` / `random_seed`）是**给未来仿真台预留**的字段；
+  当前磐安县仿真台由 `panan/scripts/panan_bridge.py` 驱动，参数见第 5.4 节与[参数手册](parameter-reference.md)。

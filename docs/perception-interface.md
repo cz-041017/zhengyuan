@@ -21,7 +21,12 @@
 
 ---
 
-## 2. 数据契约 A：车辆检测 `VehicleObservation`
+## 2. 数据契约 A：车辆检测
+
+> **数据流**：感知层传入 `RawDetection`（原始检测）→ 经 `normalize_detections()` 校验并转换为
+> 决策层内部使用的 `VehicleObservation`。两者字段**基本对应**，但 `RawDetection.confidence`
+> 仅保留在感知侧，`VehicleObservation` 不含该字段（normalize 时丢弃）。
+> `normalize_detections` 会校验 `lane_id` 必须是下方 8 个规范 ID 之一，否则直接报错（不静默丢弃）。
 
 每辆车每次被识别，发一条检测记录。字段如下：
 
@@ -63,6 +68,8 @@ camera_2:
 
 - `observed_at` 用**同一时钟**（建议自研边缘机统一 NTP），单位秒。
 - 决策层用 `observed_at` 计算「最老等待时间」（P0 的 120s 计时），时钟漂移会直接破坏等待计时，请保证同步。
+- **必须 `observed_at ≤ now`**：`QueueEstimator` 会丢弃"时间戳在未来"的观测（视为非法），
+  请确保边缘机时钟不超前。
 
 ### 2.3 `track_id` 稳定性（关键）
 
@@ -73,7 +80,8 @@ camera_2:
 ### 2.4 `speed_mps` 说明
 
 - 决策层用 `speed_mps ≤ 0.5 m/s` 判定「排队车辆」（阈值可调，见参数参考）。
-- 无法测速时填 `null`：该车仍计入「车辆数」，但不计入「排队长度」（排队长度视为未知）——**可以接受，但会低估排队压力**。
+- 无法测速时填 `null`：该车仍计入「车辆数」；但**排队长度会被记为 `0.0`（而非"未知"）**——
+  这会低估排队压力，建议尽量提供测速。
 
 ### 2.5 频率与新鲜度（务必遵守）
 
@@ -95,12 +103,26 @@ camera_2:
 - 占用率定义由你们定义（如「下游停止线后 50m 内排队车辆数 / 该路段容量」），只需**归一化到 [0,1]** 且**口径一致**。
 - 决策层滞回阈值：`occupancy ≥ 0.8` 判「下游拥堵」，降到 `≤ 0.5` 才解除（阈值可调）。
 - **红线**：拿不到下游数据时上报 `null`，**不要上报 0**——决策层会把「未知」按「拥堵」处理，把 0 误报为畅通可能造成上游继续放行、下游溢出。
+- **实现边界**：`DownstreamReport.lane_id` **不做规范 ID 校验**（任意字符串都接受）；
+  `observed_at` 当前**不被消费**（决策层只看"有没有返回条目"，不按时间戳判新鲜度）。
+- **缺条目 ≠ null**：若某个下游方向**整条缺失**（没发报告），`SpillbackMonitor` 不会清零，
+  而是**保持上一次状态**。这可能把"断流"误判为"畅通"，因此**务必每帧都发全部下游方向**。
 
 ---
 
 ## 4. 每帧打包 `PerceptionFrame`
 
-一个上报周期把两类数据打包成一帧：
+一个上报周期把两类数据打包成一帧。Python 端结构：
+
+```python
+@dataclass(frozen=True)
+class PerceptionFrame:
+    observed_at: float                          # 帧时间戳（秒）
+    detections: tuple[VehicleObservation, ...]  # 车辆检测（已 normalize）
+    downstream: tuple[DownstreamReport, ...] = ()  # 下游占用（可空）
+```
+
+对应 JSON 表示：
 
 ```json
 {
@@ -133,6 +155,7 @@ observations = normalize_detections([
 occupancy = downstream_occupancy([
     DownstreamReport(lane_id="east_through", occupancy=0.85, observed_at=now),
 ])
+# downstream_occupancy 返回 dict[lane_id -> float|None]，None 表示"未知"（决策层按拥堵处理）
 # 之后：QueueEstimator.update(observations, now)  →  聚合为 PhaseDemand → PhaseStateMachine.tick()
 ```
 
