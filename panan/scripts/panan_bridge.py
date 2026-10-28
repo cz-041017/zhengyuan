@@ -51,10 +51,6 @@ DEFAULT_MIN_GREEN = 10.0
 DEFAULT_MAX_GREEN = 60.0
 DEFAULT_YELLOW = 3.0
 DEFAULT_ALL_RED = 1.0
-RED_COUNTDOWN_S = 10.0  # 红变绿前倒计时时长（演示用）
-
-# 演示重点关注路口（奉庆线驶入路口），对其详细打印倒计时
-DEMO_JUNCTION = "cluster_4178171527_4178193015_7358133708_7358133709"
 
 
 # ---------------------------------------------------------------------------
@@ -409,18 +405,8 @@ class Simulation:
                         ctrl.apply_tls(traci, "all_red", None)
                     else:
                         ctrl.apply_tls(traci, "yellow", old_phase)
-                elif clr["stage"] == "all_red":
+                else:
                     if elapsed >= clr["all_red_s"]:
-                        clr["stage"] = "red_countdown"; clr["started"] = now
-                        ctrl.state = ControllerState(ControllerMode.ALL_RED, old_phase, ctrl.state.phase_started_at)
-                        ctrl.apply_tls(traci, "all_red", None)
-                        if ctrl.junction_id == DEMO_JUNCTION:
-                            print(f"[倒计时] 奉庆线路口 红灯 {int(RED_COUNTDOWN_S):2d}s → 即将变绿", flush=True)
-                    else:
-                        ctrl.apply_tls(traci, "all_red", None)
-                else:  # red_countdown：红变绿前 10s 倒计时
-                    remain = RED_COUNTDOWN_S - elapsed
-                    if remain <= 0:
                         target = clr["target"]
                         ctrl.state = ControllerState(ControllerMode.NORMAL, target, now)
                         ctrl.clearance = None
@@ -428,8 +414,6 @@ class Simulation:
                         ctrl.apply_tls(traci, "green", target)
                     else:
                         ctrl.apply_tls(traci, "all_red", None)
-                        if ctrl.junction_id == DEMO_JUNCTION:
-                            print(f"[倒计时] 奉庆线路口 红灯 {math.ceil(remain):2d}s → 即将变绿", flush=True)
 
     def _step_fixed(self, traci: Any, now: float, vehicles: dict[str, dict[str, Any]]) -> None:
         """固定配时：按**每个路口自身的相位集合**轮换（3岔 3 相位 / 4岔 4 相位）。"""
