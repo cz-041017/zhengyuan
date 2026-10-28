@@ -21,9 +21,9 @@ CTRL="${1:-adaptive}"
 END="${2:-3600}"
 REGEN="${3:-}"
 
-# 改过路网后：重新生成需求（seed=42，period=1.5 → 约 2400 车次/小时 + 奉庆线 400 辆）
-if [ "$REGEN" = "regen" ] || [ ! -f panan/demand/panan_routes.rou.xml ]; then
-  echo "==> 生成随机 OD 需求"
+# 改过路网后 / 需求缺失 / 路网比需求新 → 重新生成需求（seed=42，含奉庆线 400 辆）
+if [ "$REGEN" = "regen" ] || [ ! -f panan/demand/panan_routes.rou.xml ] || [ panan/network/panan.net.xml -nt panan/demand/panan_routes.rou.xml ]; then
+  echo "==> 生成随机 OD 需求（路网已变更或需求缺失）"
   python3 "$SUMO_TOOLS/randomTrips.py" -n panan/network/panan.net.xml \
     -o panan/demand/panan_trips.xml -e "$END" --period 1.5 --fringe-factor 5 --min-distance 300 --seed 42
   echo "==> 生成奉庆线额外车流"

@@ -27,9 +27,9 @@ case "$MODE" in
   gif)    GIF="panan/results/demo.gif"; END="180"; [ "$MODE2" = "fixed" ] && CTRL="fixed";;
 esac
 
-# 若需求文件不存在，先生成随机 OD 需求（seed=42）+ 奉庆线额外车流
-if [ ! -f panan/demand/panan_routes.rou.xml ]; then
-  echo "==> 生成随机 OD 需求"
+# 需求不存在、或路网比需求新（改过路网）→ 重新生成需求
+if [ ! -f panan/demand/panan_routes.rou.xml ] || [ panan/network/panan.net.xml -nt panan/demand/panan_routes.rou.xml ]; then
+  echo "==> 生成随机 OD 需求（路网已变更或需求缺失）"
   python3 "$SUMO_TOOLS/randomTrips.py" -n panan/network/panan.net.xml \
     -o panan/demand/panan_trips.xml -e 3600 --period 1.5 --fringe-factor 5 --min-distance 300 --seed 42
   echo "==> 生成奉庆线额外车流"
