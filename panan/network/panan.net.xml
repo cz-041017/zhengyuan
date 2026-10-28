@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<!-- generated on 2026-10-28T18:06:35.529762+08:00 by Eclipse SUMO netedit 1.28.0
+<!-- generated on 2026-10-28T18:52:39.790333+08:00 by Eclipse SUMO netedit 1.28.0
 <neteditConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/neteditConfiguration.xsd">
 
     <input>
@@ -3964,7 +3964,7 @@
         <lane id=":7358133802_0_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="20.84" length="5.93" shape="1523.94,2854.14 1520.96,2849.01"/>
     </edge>
     <edge id=":7358133802_1" function="internal">
-        <lane id=":7358133802_1_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="27.78" length="4.29" shape="1525.05,2849.99 1520.96,2849.01"/>
+        <lane id=":7358133802_1_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="27.78" length="4.29" shape="1525.06,2849.99 1520.96,2849.01"/>
         <lane id=":7358133802_1_1" index="1" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="27.78" length="4.29" shape="1525.88,2846.90 1521.62,2845.88"/>
     </edge>
     <edge id=":7358159999_0" function="internal">
@@ -5357,13 +5357,13 @@
         <lane id=":J124_5_0" index="0" speed="7.41" length="16.76" shape="376.18,1588.01 379.56,1584.29 382.73,1583.21 385.70,1584.77 388.46,1588.98"/>
     </edge>
     <edge id=":J125_0" function="internal">
-        <lane id=":J125_0_0" index="0" speed="13.89" length="17.87" shape="1612.09,2899.46 1608.24,2895.39 1604.31,2893.26 1600.47,2892.07 1596.89,2890.86"/>
+        <lane id=":J125_0_0" index="0" speed="13.89" length="17.84" shape="1612.07,2899.42 1608.22,2895.37 1604.31,2893.24 1600.48,2892.07 1596.89,2890.86"/>
     </edge>
     <edge id=":J125_1" function="internal">
-        <lane id=":J125_1_0" index="0" speed="13.89" length="17.14" shape="1612.09,2899.46 1608.76,2895.60 1605.91,2893.45 1603.05,2891.30 1599.72,2887.44"/>
-        <lane id=":J125_1_1" index="1" speed="13.89" length="17.14" shape="1612.09,2899.46 1602.34,2885.60"/>
-        <lane id=":J125_1_2" index="2" speed="13.89" length="17.14" shape="1614.71,2897.62 1611.38,2893.76 1608.52,2891.61 1605.67,2889.46 1602.34,2885.60"/>
-        <lane id=":J125_1_3" index="3" speed="13.89" length="17.14" shape="1614.71,2897.62 1604.96,2883.76"/>
+        <lane id=":J125_1_0" index="0" speed="13.89" length="17.12" shape="1612.07,2899.42 1608.74,2895.57 1605.89,2893.43 1603.04,2891.28 1599.71,2887.43"/>
+        <lane id=":J125_1_1" index="1" speed="13.89" length="17.12" shape="1612.07,2899.42 1602.33,2885.59"/>
+        <lane id=":J125_1_2" index="2" speed="13.89" length="17.12" shape="1614.69,2897.58 1611.36,2893.73 1608.51,2891.59 1605.65,2889.44 1602.33,2885.59"/>
+        <lane id=":J125_1_3" index="3" speed="13.89" length="17.12" shape="1614.69,2897.58 1604.95,2883.75"/>
     </edge>
     <edge id=":J126_0" function="internal">
         <lane id=":J126_0_0" index="0" speed="13.89" length="14.43" shape="535.83,1660.18 532.36,1674.19"/>
@@ -10596,7 +10596,7 @@
         <param key="ref" value="S209"/>
     </edge>
     <edge id="787068635#1" from="cluster_4178171527_4178193015_7358133708_7358133709" to="7358133802" name="奉庆线" priority="12" type="highway.primary" spreadType="center" shape="1581.85,2863.55 1523.41,2847.89">
-        <lane id="787068635#1_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="27.78" length="48.57" shape="1571.97,2862.56 1525.05,2849.99"/>
+        <lane id="787068635#1_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="27.78" length="48.57" shape="1571.97,2862.56 1525.06,2849.99"/>
         <lane id="787068635#1_1" index="1" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="27.78" length="48.57" shape="1572.80,2859.47 1525.88,2846.90"/>
         <param key="ref" value="S209"/>
     </edge>
@@ -10805,13 +10805,13 @@
         <lane id="E1_1" index="1" speed="13.89" length="60.85" shape="1218.39,5730.41 1243.51,5674.99"/>
     </edge>
     <edge id="E10" from="5613471581" to="J125" priority="-1">
-        <lane id="E10_0" index="0" speed="13.89" length="83.00" shape="1659.86,2967.33 1612.09,2899.46"/>
-        <lane id="E10_1" index="1" speed="13.89" length="83.00" shape="1662.48,2965.49 1614.71,2897.62"/>
+        <lane id="E10_0" index="0" speed="13.89" length="83.04" shape="1659.86,2967.33 1612.07,2899.42"/>
+        <lane id="E10_1" index="1" speed="13.89" length="83.04" shape="1662.48,2965.49 1614.69,2897.58"/>
     </edge>
     <edge id="E10.103" from="J125" to="cluster_4178171527_4178193015_7358133708_7358133709" priority="-1">
-        <lane id="E10.103_0" index="0" speed="13.89" length="9.72" shape="1599.72,2887.44 1594.13,2879.49"/>
-        <lane id="E10.103_1" index="1" speed="13.89" length="9.72" shape="1602.34,2885.60 1596.75,2877.65"/>
-        <lane id="E10.103_2" index="2" speed="13.89" length="9.72" shape="1604.96,2883.76 1599.36,2875.81"/>
+        <lane id="E10.103_0" index="0" speed="13.89" length="9.70" shape="1599.71,2887.43 1594.13,2879.49"/>
+        <lane id="E10.103_1" index="1" speed="13.89" length="9.70" shape="1602.33,2885.59 1596.75,2877.65"/>
+        <lane id="E10.103_2" index="2" speed="13.89" length="9.70" shape="1604.95,2883.75 1599.36,2875.81"/>
     </edge>
     <edge id="E100" from="J64" to="J76" priority="-1">
         <lane id="E100_0" index="0" speed="13.89" length="327.98" shape="5099.63,2206.66 4931.49,1925.06"/>
@@ -13452,7 +13452,7 @@
         <request index="0" response="00" foes="00" cont="0"/>
         <request index="1" response="00" foes="00" cont="0"/>
     </junction>
-    <junction id="7358133802" type="priority" x="1523.41" y="2847.89" incLanes="E171_0 787068635#1_0 787068635#1_1" intLanes=":7358133802_0_0 :7358133802_1_0 :7358133802_1_1" shape="1523.53,2855.68 1526.30,2845.35 1521.95,2844.31 1520.63,2850.58">
+    <junction id="7358133802" type="priority" x="1523.41" y="2847.89" incLanes="E171_0 787068635#1_0 787068635#1_1" intLanes=":7358133802_0_0 :7358133802_1_0 :7358133802_1_1" shape="1523.53,2855.69 1526.30,2845.35 1521.95,2844.31 1520.63,2850.57">
         <request index="0" response="110" foes="110" cont="0"/>
         <request index="1" response="000" foes="001" cont="0"/>
         <request index="2" response="000" foes="001" cont="0"/>
@@ -14000,7 +14000,7 @@
         <request index="4" response="000010" foes="000010" cont="0"/>
         <request index="5" response="001110" foes="001110" cont="0"/>
     </junction>
-    <junction id="J125" type="priority" x="1608.87" y="2886.54" incLanes="E10_0 E10_1" intLanes=":J125_0_0 :J125_1_0 :J125_1_1 :J125_1_2 :J125_1_3" shape="1610.78,2900.38 1616.02,2896.70 1606.26,2882.84 1598.41,2888.36 1597.55,2889.41 1596.22,2892.32 1599.60,2893.64 1602.30,2894.43 1604.55,2895.09 1606.56,2896.03 1608.57,2897.66">
+    <junction id="J125" type="priority" x="1608.87" y="2886.54" incLanes="E10_0 E10_1" intLanes=":J125_0_0 :J125_1_0 :J125_1_1 :J125_1_2 :J125_1_3" shape="1610.76,2900.35 1615.99,2896.66 1606.26,2882.83 1598.41,2888.35 1597.54,2889.40 1596.22,2892.31 1599.59,2893.63 1602.29,2894.41 1604.53,2895.07 1606.55,2896.01 1608.55,2897.63">
         <request index="0" response="00000" foes="00000" cont="0"/>
         <request index="1" response="00000" foes="00000" cont="0"/>
         <request index="2" response="00000" foes="01000" cont="0"/>
@@ -17694,7 +17694,7 @@
     <connection from="E10" to="E204" fromLane="0" toLane="0" via=":J125_0_0" dir="r" state="M"/>
     <connection from="E10" to="E10.103" fromLane="0" toLane="0" via=":J125_1_0" dir="s" state="M"/>
     <connection from="E10" to="E10.103" fromLane="0" toLane="1" via=":J125_1_1" dir="s" state="M"/>
-    <connection from="E10" to="E10.103" fromLane="1" toLane="1" via=":J125_1_2" dir="s" state="m"/>
+    <connection from="E10" to="E10.103" fromLane="1" toLane="1" via=":J125_1_2" dir="s" state="M"/>
     <connection from="E10" to="E10.103" fromLane="1" toLane="2" via=":J125_1_3" dir="s" state="M"/>
     <connection from="E10.103" to="787068635#1" fromLane="0" toLane="0" via=":cluster_4178171527_4178193015_7358133708_7358133709_0_0" tl="cluster_4178171527_4178193015_7358133708_7358133709" linkIndex="0" dir="s" state="o"/>
     <connection from="E10.103" to="787068635#1" fromLane="1" toLane="1" via=":cluster_4178171527_4178193015_7358133708_7358133709_0_1" tl="cluster_4178171527_4178193015_7358133708_7358133709" linkIndex="1" dir="s" state="o"/>
