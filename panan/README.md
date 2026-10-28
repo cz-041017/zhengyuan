@@ -126,8 +126,19 @@ bash panan/scripts/build_net.sh   # 去辅助道路 + 选干净交叉口(间距�
 - **只控信号灯路口**：OSM/net 中 `traffic_light` 节点才交给决策层，其余保持 SUMO 默认（优先/环岛）。
 - **指标**：理论最大承载车流（车道数×1800 veh/h）、实际通过车流、平均通过路口时间（停止线 60m 检测区）、
   平均等待时间。
-  
- ## 一键运行仿真验证
-  cd /home/ubuntu/zhengyuan
+
+## 演示定制（给甲方演示）
+
+- **奉庆线车流注入**：`gen_fengqing_flow.py` 生成 400 辆从「奉庆线」驶入路口
+  `cluster_4178171527_...` 的车辆（奉庆线驶入边 `787068627#2`）。
+- **起步延时**：`config/vtypes.add.xml` 覆盖默认车辆参数（`accel=1.2 / sigma=1.0 / tau=1.5`），
+  绿灯后车辆逐辆缓慢起步。
+- **红变绿 10s 倒计时**：`panan_bridge.py` 在相位切换时加入 10s 红灯倒计时（演示路口打印 10→1）。
+
+## 一键运行仿真验证
+
+```bash
+cd /home/ubuntu/zhengyuan
 bash panan/scripts/run_demo.sh
+```
 
