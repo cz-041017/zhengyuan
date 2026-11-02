@@ -168,7 +168,7 @@ def test_runtime_timing_analysis_feasible() -> None:
     )
 
     # Placeholder timings: min green 10 + clearance 4 = 14 < 130 -> feasible.
-    assert analysis.feasible_120s is True
+    assert analysis.feasible_within_deadline is True
 
 
 def test_runtime_includes_feedback_monitor() -> None:

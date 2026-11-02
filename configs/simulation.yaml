@@ -34,11 +34,6 @@ optimization:
     - main_road_green_wave
     - demand_score
 
-simulation:
-  duration_s: 3600.0
-  step_s: 0.5
-  random_seed: 42
-
 signal:
   layout:
     mode: main_road

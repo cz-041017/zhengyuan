@@ -19,7 +19,7 @@ def make_phases(min_green=10.0, max_green=60.0, yellow=3.0, all_red=1.0):
 def test_feasible_when_switch_overhead_below_deadline() -> None:
     analysis = analyze_timing(make_phases(), 120.0)
 
-    assert analysis.feasible_120s is True
+    assert analysis.feasible_within_deadline is True
     # min green 10 + yellow 3 + all-red 1 = 14
     assert analysis.max_time_to_green_s == 14.0
 
@@ -31,7 +31,7 @@ def test_infeasible_when_min_green_plus_clearance_reaches_deadline() -> None:
         make_phases(min_green=120.0, max_green=120.0), 120.0
     )
 
-    assert analysis.feasible_120s is False
+    assert analysis.feasible_within_deadline is False
     assert "switch_overhead_exceeds_deadline" in analysis.reasons
 
 
@@ -50,7 +50,7 @@ def test_no_preempt_required_when_cycle_short() -> None:
     analysis = analyze_timing(make_phases(max_green=20.0), 120.0)
 
     assert analysis.preempt_required == frozenset()
-    assert analysis.feasible_120s is True
+    assert analysis.feasible_within_deadline is True
 
 
 def test_rejects_empty_phases() -> None:

@@ -10,7 +10,7 @@ from traffic_control.models import SignalPhase
 class TimingAnalysis:
     """Result of the worst-case timing analysis for the P0 deadline."""
 
-    feasible_120s: bool
+    feasible_within_deadline: bool
     max_time_to_green_s: float
     worst_wait_s: Mapping[str, float]
     preempt_required: frozenset[str]
@@ -22,7 +22,7 @@ def analyze_timing(
 ) -> TimingAnalysis:
     """Worst-case timing analysis for the P0 ≤ D guarantee.
 
-    ``feasible_120s`` is True only when the largest switch overhead — a
+    ``feasible_within_deadline`` is True only when the largest switch overhead — a
     phase's minimum green plus its yellow/all-red clearance — is strictly
     below the deadline. Otherwise a direction could not be served within the
     deadline even by an immediate preemption, because the current phase must
@@ -76,7 +76,7 @@ def analyze_timing(
         reasons.append("preempt_load_bearing")
 
     return TimingAnalysis(
-        feasible_120s=feasible,
+        feasible_within_deadline=feasible,
         max_time_to_green_s=max_time_to_green,
         worst_wait_s=worst_wait,
         preempt_required=preempt_required,

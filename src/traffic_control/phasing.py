@@ -24,20 +24,6 @@ APPROACH_MOVEMENTS = {
     "W": frozenset({WEST_THROUGH, WEST_LEFT}),
 }
 
-THROUGH_MOVEMENTS = {
-    "N": NORTH_THROUGH,
-    "E": EAST_THROUGH,
-    "S": SOUTH_THROUGH,
-    "W": WEST_THROUGH,
-}
-
-LEFT_MOVEMENTS = {
-    "N": NORTH_LEFT,
-    "E": EAST_LEFT,
-    "S": SOUTH_LEFT,
-    "W": WEST_LEFT,
-}
-
 # ---------------------------------------------------------------------------
 # Pedestrian crossings. Each crossing is named by the side of the intersection
 # it lies on. A phase that releases vehicles may only release the crossing(s)

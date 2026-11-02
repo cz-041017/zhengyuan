@@ -124,6 +124,7 @@ def test_no_feasible_successor_is_infeasible() -> None:
     )
     assert decision.reason == "no_feasible_successor"
     assert decision.feasible is False
+    assert "all_red_required" in decision.constraints_applied
 
 
 def test_no_feasible_alarm_is_emitted() -> None:

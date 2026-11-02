@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import time
@@ -340,7 +341,7 @@ class Simulation:
                 link_approach.append(appr)
 
             phase_ids = list(phases.keys())
-            h = abs(hash(jid)) % len(phase_ids)
+            h = int(hashlib.md5(jid.encode()).hexdigest(), 16) % len(phase_ids)
             initial = phase_ids[h]
 
             self.controllers[jid] = JunctionController(
@@ -403,6 +404,15 @@ class Simulation:
                     if decision.reason == "p0_wait_preempt":
                         ctrl.p0_preempts += 1
                     ctrl.apply_tls(traci, "yellow", ctrl.state.current_phase_id)
+                elif (
+                    not decision.feasible
+                    and "all_red_required" in decision.constraints_applied
+                ):
+                    # Maximum green reached with every successor downstream-
+                    # blocked: enforce the hard cap with all-red. Stay in
+                    # NORMAL so the state machine re-evaluates next step and we
+                    # switch as soon as a successor clears.
+                    ctrl.apply_tls(traci, "all_red", None)
                 else:
                     ctrl.apply_tls(traci, "green", ctrl.state.current_phase_id)
             else:
@@ -600,9 +610,10 @@ class Simulation:
         if metrics_path is not None:
             metrics_path.parent.mkdir(parents=True, exist_ok=True)
             with metrics_path.open("w", newline="") as f:
-                w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-                w.writeheader()
-                w.writerows(rows)
+                if rows:
+                    w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+                    w.writeheader()
+                    w.writerows(rows)
 
         per_junction = {}
         for jid, c in self.controllers.items():
@@ -629,8 +640,8 @@ class Simulation:
             "arrived": arrived_total,
             "duration_s": duration,
             "avg_delay_s": round(total_delay / delay_count, 3) if delay_count else 0.0,
-            "avg_queue_veh": round(queue_sum / total_steps, 3),
-            "capacity_veh_per_h": round(arrived_total / duration * 3600.0, 2),
+            "avg_queue_veh": round(queue_sum / total_steps, 3) if total_steps else 0.0,
+            "capacity_veh_per_h": round(arrived_total / duration * 3600.0, 2) if duration else 0.0,
             "conflicts": int(conflict_sum),
         }
         return SimulationResult(rows, per_junction, capacity, summary)
@@ -638,7 +649,10 @@ class Simulation:
 
 def _edge_heading_from_traci(traci: Any, edge_id: str) -> tuple[float, float]:
     shape = traci.edge.getShape(edge_id)
-    (x0, y0), (x1, y1) = shape[0], shape[-1]
+    if len(shape) >= 2:
+        (x0, y0), (x1, y1) = shape[-2], shape[-1]
+    else:
+        (x0, y0), (x1, y1) = shape[0], shape[-1]
     return x1 - x0, y1 - y0
 
 

@@ -1,5 +1,9 @@
 # interface/sumo —— SUMO 仿真台
 
+> **⚠️ 已降级**：本目录是早期 4 向路口演示桥接，现由
+> [`panan/scripts/panan_bridge.py`](../../panan/scripts/panan_bridge.py)（磐安县真实路网）
+> 取代为正式维护的 SUMO 桥接。此处保留仅作最小示例参考。
+
 用 SUMO 仿真一个 4 向路口，把决策层当「软相位请求」驱动起来。
 
 ## 环境

@@ -126,9 +126,9 @@
   - **接口层**拿到该字段后，必须按**实际正在执行的剩余绿灯时间**重算行人黄灯，
     窗口长度用 `pedestrian.yellow_s`。绿灯延长到 `max_green` 或被 P0 提前抢占时，
     都应以接口层的实际剩余时间为准。
-- **仿真台注意**：`panan_bridge.py` 的相位 `min_green_s` 硬编码为 10，小于默认
-  `pedestrian.min_green_s=12`，因此**仿真台里行人保底会被跳过**（候选 min_green < 12 被拒绝）。
-  若要在仿真中观察行人保底，需把仿真台相位最小绿调到 ≥12。
+- **仿真台注意**：`panan_bridge.py` 的相位 `min_green_s` 默认 `DEFAULT_MIN_GREEN = 12.0`，
+  与 `pedestrian.min_green_s=12` 一致，因此仿真台默认能观察行人保底。
+  若用 `--min-green` 调到 < 12，行人保底会被跳过（候选 min_green < 12 被拒绝）。
 
 ## 8. 安全开关（`safety`）
 

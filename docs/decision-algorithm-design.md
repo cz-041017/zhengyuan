@@ -373,25 +373,25 @@ signal:
   phases:                                 # 经审核的相位配时；必须与布局派生的相位 ID/流向完全一致
     - phase_id: P_MT                       # 模式 B 示例；模式 A 用 P_N/P_E/P_S/P_W
       movement_ids: [north_through, south_through]
-      min_green_s: 10
+      min_green_s: 12
       max_green_s: 60
       yellow_s: 3
       all_red_s: 1
     - phase_id: P_ML
       movement_ids: [north_left, south_left]
-      min_green_s: 10
+      min_green_s: 12
       max_green_s: 60
       yellow_s: 3
       all_red_s: 1
     - phase_id: P_E
       movement_ids: [east_through, east_left]
-      min_green_s: 10
+      min_green_s: 12
       max_green_s: 60
       yellow_s: 3
       all_red_s: 1
     - phase_id: P_W
       movement_ids: [west_through, west_left]
-      min_green_s: 10
+      min_green_s: 12
       max_green_s: 60
       yellow_s: 3
       all_red_s: 1

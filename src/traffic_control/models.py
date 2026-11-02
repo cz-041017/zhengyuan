@@ -19,6 +19,16 @@ class ControllerMode(str, Enum):
     MANUAL_OVERRIDE = "manual_override"
 
 
+# Simulation-only placeholder timings (NOT audited values). Used only when
+# ``signal.phases`` is empty (simulation mode); deployment configs must carry
+# reviewed per-phase timings in ``signal.phases``. Keep in sync with
+# docs/parameter-reference.md.
+SIM_MIN_GREEN_S = 12.0
+SIM_MAX_GREEN_S = 60.0
+SIM_YELLOW_S = 3.0
+SIM_ALL_RED_S = 1.0
+
+
 @dataclass(frozen=True)
 class VehicleObservation:
     """A vehicle detected by the vision system at a specific time."""

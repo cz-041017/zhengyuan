@@ -195,7 +195,7 @@ from traffic_control.timing_analysis import analyze_timing
 
 runtime = build_runtime(load_config("configs/simulation.yaml"))
 a = analyze_timing(runtime.phases, runtime.score_config.max_wait_target_s)
-print("130s 可行：", a.feasible_120s)
+print("130s 可行：", a.feasible_within_deadline)
 print("最大切换开销(s)：", a.max_time_to_green_s)
 print("无抢占最坏等待(s)：", a.worst_wait_s)
 print("依赖抢占的相位：", a.preempt_required)

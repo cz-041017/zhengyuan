@@ -7,19 +7,17 @@ from typing import Any
 
 from traffic_control.degradation import DegradationController
 from traffic_control.feedback import FeedbackMonitor
-from traffic_control.models import SignalPhase
+from traffic_control.models import (
+    SIM_ALL_RED_S,
+    SIM_MAX_GREEN_S,
+    SIM_MIN_GREEN_S,
+    SIM_YELLOW_S,
+    SignalPhase,
+)
 from traffic_control.phasing import ConflictMatrix, PhaseGroup, phase_groups
 from traffic_control.scoring import ScoreConfig, Scorer, SpillbackMonitor
 from traffic_control.state_machine import MachineConfig, PhaseStateMachine
 from traffic_control.timing_analysis import analyze_timing
-
-# Simulation-only placeholder timings. These are NOT audited values and must
-# never be used for deployment; deployment configs must carry reviewed
-# per-phase timings in signal.phases.
-_SIM_MIN_GREEN_S = 12.0
-_SIM_MAX_GREEN_S = 60.0
-_SIM_YELLOW_S = 3.0
-_SIM_ALL_RED_S = 1.0
 
 
 def build_score_config(config: dict[str, Any]) -> ScoreConfig:
@@ -109,10 +107,10 @@ def build_phases(config: dict[str, Any]) -> dict[str, SignalPhase]:
         group.phase_id: SignalPhase(
             phase_id=group.phase_id,
             movement_ids=group.movement_ids,
-            min_green_s=_SIM_MIN_GREEN_S,
-            max_green_s=_SIM_MAX_GREEN_S,
-            yellow_s=_SIM_YELLOW_S,
-            all_red_s=_SIM_ALL_RED_S,
+            min_green_s=SIM_MIN_GREEN_S,
+            max_green_s=SIM_MAX_GREEN_S,
+            yellow_s=SIM_YELLOW_S,
+            all_red_s=SIM_ALL_RED_S,
             crosswalk_ids=group.crosswalk_ids,
         )
         for group in groups
@@ -195,7 +193,7 @@ def build_runtime(config: dict[str, Any]) -> RuntimeObjects:
     phases = build_phases(config)
 
     analysis = analyze_timing(phases, score_config.max_wait_target_s)
-    if not analysis.feasible_120s:
+    if not analysis.feasible_within_deadline:
         warnings.warn(
             "timing may be infeasible: the largest switch overhead "
             f"({analysis.max_time_to_green_s:.1f}s) reaches the wait deadline "

@@ -273,16 +273,13 @@ class PhaseStateMachine:
             successor = self._best_candidate(red_phases, blocked, demands)
             self._clear_transient()
             if successor is None:
-                # KNOWN LIMITATION, left as documentation deliberately.
-                # With the maximum green reached and every successor excluded
-                # by downstream spillback, this returns "hold" and the current
-                # green keeps running past its hard cap, contradicting the
-                # max-green invariant (design §5). Probability is low because
-                # it needs every red direction to be congested simultaneously.
-                # Suggested fix when it is worth the contract change: emit an
-                # explicit all-red/clearance request, e.g.
-                #   constraints_applied=("max_green", "all_red_required")
-                # and require the controller to enter all-red on that flag.
+                # Maximum green reached but every successor is excluded by
+                # downstream spillback. Enforce the hard cap by requesting
+                # all-red: constraints_applied carries "all_red_required" and
+                # the caller (controller / interface layer) MUST honour it by
+                # showing all-red and re-evaluating until a successor becomes
+                # feasible. The decision layer raises
+                # AlarmType.NO_FEASIBLE_PHASE on this result.
                 return PhaseDecision(
                     None,
                     "no_feasible_successor",

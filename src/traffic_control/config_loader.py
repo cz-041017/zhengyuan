@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 
+from traffic_control.models import SIM_MIN_GREEN_S
 from traffic_control.scoring import ScoreConfig
 
 
@@ -243,12 +244,12 @@ def validate_config(config: dict[str, Any]) -> None:
                 "min_green_s"
             )
     else:
-        # Placeholder (simulation) phases use a 15 s minimum green; a larger
+        # Placeholder (simulation) phases use SIM_MIN_GREEN_S; a larger
         # pedestrian requirement cannot be honoured there either.
-        if pedestrian.get("min_green_s", 12.0) > 15.0:
+        if pedestrian.get("min_green_s", 12.0) > SIM_MIN_GREEN_S:
             raise ConfigError(
                 "pedestrian.min_green_s must not exceed the placeholder "
-                "phase min_green_s (15 s)"
+                f"phase min_green_s ({SIM_MIN_GREEN_S} s)"
             )
 
     if runtime["mode"] == "deployment" and not phases:
