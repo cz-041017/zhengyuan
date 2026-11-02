@@ -1,0 +1,28 @@
+# 相位映射表（占位，待用户按海康 XHJ-CW-GA-HK3 实际相位编号填写）
+#
+# 左列 = 决策层 phase_id（见 docs/decision-algorithm-design.md 的相位分组）
+# 右列 = 信号机内部相位编号（以海康官方《XHJ-CW-GA-HK3 通信协议》为准）
+#
+# 决策层 phase_id 说明：
+#   模式 A（无主路，四向皆支路）: P_N / P_E / P_S / P_W（每向直行+左转合并）
+#   模式 B（有主路）:            P_MT / P_ML（主路直行绿波 / 主路左转）+ P_E / P_W（支路）
+#
+# 注意：下列编号是占位序号，仅保证彼此不同；实际编号须按信号机相位表回填。
+phases:
+  # 模式 A
+  P_N: 1     # TODO: 填实际相位编号
+  P_E: 2
+  P_S: 3
+  P_W: 4
+  # 模式 B
+  P_MT: 5    # 主路双向直行（绿波）
+  P_ML: 6    # 主路双向左转
+
+# 特殊状态（保留编号；null = 该信号机不支持此态，接口会抛错或跳过）
+special:
+  all_red: 0       # 全红（P1 拥堵 / 最大绿硬上限时请求全红）TODO
+  flash: null      # 黄闪（降级态）TODO
+  off: null        # 熄灯 TODO
+
+# 信号机地址（源站号，范围 0x01-0xEF）
+controller_address: 0x01
