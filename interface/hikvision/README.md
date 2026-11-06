@@ -65,6 +65,21 @@ link.request_detach()
 link.close()
 ```
 
+## 生产入口 main.py
+
+仓库根目录的 [`main.py`](../../main.py) 是把「感知 → 决策层 → 本接口」串起来的板子主程序
+（软请求）。用法：
+
+```bash
+uv run python main.py --config configs/deployment.yaml                # 正常跑（无限循环）
+uv run python main.py --config configs/deployment.yaml --max-ticks 5  # 离线冒烟（跑 5 tick 停）
+```
+
+它负责：读感知 JSON 文件 → `DecisionLayer.tick()` → 相位切换时 `request_phase()`；
+FAILSAFE（感知断流）时请求**全红**并告警；心跳 `poll()`；收到 SIGINT/SIGTERM 时
+`request_detach()` + `close()` 优雅退出。传输类型（serial/tcp/null）由
+`configs/deployment.yaml` 的 `link.transport.type` 决定。
+
 ## RK3588 部署
 
 - 系统：ARM64 Linux（Ubuntu/Debian），Python 3.11 + uv。

@@ -85,7 +85,7 @@ camera_2:
 
 ### 2.5 频率与新鲜度（务必遵守）
 
-- 建议上报频率 **≥ 1 Hz**（2–5 Hz 更佳）。
+- 建议上报频率 **≥ 2 Hz**（生产默认 2 Hz = 0.5s 一帧；2–5 Hz 更佳）。
 - **即使当前帧 0 辆车，也要发一帧空列表**（心跳）。决策层把「超过 `3 s` 无数据」视为**数据丢失**，会进入降级模式（固定配时/黄闪），**而不是当作「没车」**。
 
 ---
@@ -103,8 +103,8 @@ camera_2:
 - 占用率定义由你们定义（如「下游停止线后 50m 内排队车辆数 / 该路段容量」），只需**归一化到 [0,1]** 且**口径一致**。
 - 决策层滞回阈值：`occupancy ≥ 0.8` 判「下游拥堵」，降到 `≤ 0.5` 才解除（阈值可调）。
 - **红线**：拿不到下游数据时上报 `null`，**不要上报 0**——决策层会把「未知」按「拥堵」处理，把 0 误报为畅通可能造成上游继续放行、下游溢出。
-- **实现边界**：`DownstreamReport.lane_id` **不做规范 ID 校验**（任意字符串都接受）；
-  `observed_at` 当前**不被消费**（决策层只看"有没有返回条目"，不按时间戳判新鲜度）。
+- **校验**：`DownstreamReport.lane_id` 现在**会做规范 ID 校验**（§2.1 的 8 个 ID，拼错直接抛 `ValueError`）；
+  `observed_at` 当前仍**不被消费**（决策层只看"有没有返回条目"，不按时间戳判新鲜度）。
 - **缺条目 ≠ null**：若某个下游方向**整条缺失**（没发报告），`SpillbackMonitor` 不会清零，
   而是**保持上一次状态**。这可能把"断流"误判为"畅通"，因此**务必每帧都发全部下游方向**。
 
@@ -177,6 +177,45 @@ occupancy = downstream_occupancy([
 - [ ] 车道映射表已建立，8 个规范 ID 全部能覆盖；
 - [ ] 同一辆车跨帧 `track_id` 稳定；
 - [ ] 时钟同步，`observed_at` 一致；
-- [ ] 空场景也按时发心跳（≥1 Hz）；
+- [ ] 空场景也按时发心跳（≥2 Hz）；
 - [ ] 下游占用按 [0,1] 归一化，拿不到时发 `null` 而非 0；
 - [ ] 能测速时提供 `speed_mps`。
+
+---
+
+## 8. 生产接入（main.py 消费的 JSON 文件）
+
+板子生产入口 [`main.py`](../main.py) 每个控制周期（`tick_period_s`，默认 0.5s = 2 Hz）读取一个
+**JSON 文件快照**，路径由 [`configs/deployment.yaml`](../configs/deployment.yaml) 的
+`perception.input_path` 指定（默认 `/var/run/traffic-control/perception.json`）。
+
+### 8.1 文件格式
+
+与 §4 的 `PerceptionFrame` JSON **完全一致**：
+
+```json
+{
+  "observed_at": 1730000000.0,
+  "detections": [
+    {"track_id": 101, "lane_id": "north_through", "observed_at": 1730000000.0, "speed_mps": 0.2, "confidence": 0.93}
+  ],
+  "downstream": [
+    {"lane_id": "east_through", "occupancy": 0.85, "observed_at": 1730000000.0}
+  ]
+}
+```
+
+字段含义同 §2/§3：`detections` 里 `track_id`/`lane_id` 必填，`speed_mps`/`confidence` 可空；
+`downstream` 每个方向一条，`occupancy` 拿不到填 `null`。
+
+### 8.2 写入方式（务必遵守）
+
+1. **原子写**：先写同目录临时文件，再 `os.replace(tmp, 目标)`（POSIX 原子替换）。
+   否则 `main.py` 可能读到写了一半的 JSON，被当作损坏帧丢弃。
+2. **频率 ≥2 Hz**：与 `tick_period_s`（默认 0.5s）对齐；即使空场景也要按时写心跳帧
+   （`detections: []`、`downstream: []`）。
+3. **时钟**：`observed_at` 用 NTP 同步的 epoch 秒，与边缘机主时钟一致（见 §2.2）。
+4. **断流语义（关键）**：`main.py` 自身不判新鲜度，只把「读不到 / 损坏」当成空输入传给决策层。
+   决策层在 `observation_timeout_s`（默认 3s）无数据后进入降级（PARTIAL），
+   `2×`（6s）后进入 **FAILSAFE** —— 生产入口会请求**全红**并告警。
+   **所以：感知进程崩溃 ≠ 路口放空，而是触发全红保护，交给信号机本地兜底。**

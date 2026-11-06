@@ -1,0 +1,42 @@
+# 生产部署配置（骨架 / 占位）。
+#
+# 本文件是板子（RK3588）上 main.py 的入口配置。上线前必须逐项回填，
+# 见各 TODO。决策层参数仍在 decision_config 指向的 YAML 里（沿用
+# configs/default.yaml，其 phases 为空时走占位配时 SIM_*，见参数手册）。
+
+# 决策层配置文件路径（相对仓库根）。
+decision_config: configs/default.yaml
+
+# 控制回路周期（秒）。2 Hz（0.5s）。感知层按 ≥2Hz 写帧。
+tick_period_s: 0.5
+
+# 感知层写入的 JSON 快照（见 docs/perception-interface.md §8 生产接入）。
+perception:
+  input_path: /var/run/traffic-control/perception.json
+
+# 信号机链路（软请求：只发相位指示）。
+link:
+  # 传输：serial | tcp | null。null = 离线冒烟，不接真机。
+  transport:
+    type: serial
+    serial:
+      port: /dev/ttyS0           # TODO: 海康信号机串口 / RS-485 转 USB 口
+      baudrate: 9600             # TODO: 与信号机一致
+      parity: none               # TODO: GB/T 20999-2017 注明校验位后回填
+    tcp:
+      host: 192.168.1.100        # TODO: 以太网口时回填
+      port: 6000
+  # 决策层相位 → 信号机相位编号 的映射（占位，见该文件 TODO）。
+  phase_mapping: interface/hikvision/phase_mapping.yaml
+  heartbeat:
+    interval_s: 1.0
+    timeout_s: 3.0
+    max_missed: 3
+
+# 指挥中心接管/摘除（占位：命令文件，跨进程方式待定）。
+control_room:
+  command_path: /var/run/traffic-control/control_command.json
+
+# 启动序列结束后选定的首个绿灯相位（决策层不提议首相位）。
+# 缺省取决策层第一个相位。
+initial_phase: P_N
