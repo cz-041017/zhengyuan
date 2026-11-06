@@ -323,6 +323,17 @@ class DecisionLayer:
         occupancy = downstream_occupancy or {}
         green_wave = green_wave_active or {}
 
+        # Reject unknown lane ids: a typo would silently disable spillback
+        # protection for that direction (the occupancy never matches any
+        # movement). Fail fast so the integration error is caught at deploy
+        # time, mirroring perception.downstream_occupancy's lane-id check.
+        unknown = sorted(k for k in occupancy if k not in self._movements)
+        if unknown:
+            raise ValueError(
+                f"unknown lane_id(s) in downstream_occupancy: {unknown}; "
+                f"expected one of {sorted(self._movements)}"
+            )
+
         blocked_movements: set[str] = set()
         for movement, value in occupancy.items():
             if self._spillback.update(movement, value):

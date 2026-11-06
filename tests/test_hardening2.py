@@ -165,6 +165,72 @@ def test_no_feasible_alarm_is_emitted() -> None:
     assert any(a.alarm_type is AlarmType.NO_FEASIBLE_PHASE for a in sink.alarms)
 
 
+# -- M5: all-red recovery + malformed input + clock skew -------------------
+def test_no_feasible_successor_recovers_when_successor_clears() -> None:
+    """all-red (no_feasible_successor) must recover once a successor clears."""
+    machine = make_machine()
+    machine.tick(st("P_N", 0.0), 0.0, {})
+    blocked = {
+        p: PhaseDemand(downstream_blocked=True) for p in ("P_E", "P_S", "P_W")
+    }
+    first = machine.tick(st("P_N", 0.0), 70.0, blocked)
+    assert first.reason == "no_feasible_successor"
+    assert not first.feasible
+
+    # P_E clears: the junction must leave all-red and switch there.
+    second = machine.tick(
+        st("P_N", 0.0),
+        71.0,
+        {
+            "P_E": PhaseDemand(),
+            "P_S": PhaseDemand(downstream_blocked=True),
+            "P_W": PhaseDemand(downstream_blocked=True),
+        },
+    )
+    assert second.reason == "max_green_reached"
+    assert second.selected_phase_id == "P_E"
+
+
+def test_downstream_occupancy_rejects_unknown_lane_id() -> None:
+    """A typo'd lane id must fail fast, not silently disable spillback."""
+    layer = DecisionLayer.from_yaml(DEFAULT)
+    layer.tick(0.0, st("P_N", 0.0))  # boot (startup sequence)
+    with pytest.raises(ValueError, match="unknown lane_id"):
+        layer.tick(
+            20.0,
+            st("P_N", 0.0),
+            observations=[
+                VehicleObservation(
+                    track_id=1,
+                    lane_id="north_through",
+                    observed_at=20.0,
+                    speed_mps=0.0,
+                )
+            ],
+            downstream_occupancy={"west_thru": 0.9},
+        )
+
+
+def test_clock_skew_phase_start_in_future_is_infeasible() -> None:
+    """now before phase_started_at must report infeasible, never crash."""
+    layer = DecisionLayer.from_yaml(DEFAULT)
+    layer.tick(0.0, st("P_N", 0.0))  # boot
+    result = layer.tick(
+        15.0,
+        st("P_N", 30.0),
+        observations=[
+            VehicleObservation(
+                track_id=1,
+                lane_id="north_through",
+                observed_at=15.0,
+                speed_mps=0.0,
+            )
+        ],
+    )
+    assert result.decision.reason == "invalid_phase_start_time"
+    assert result.decision.feasible is False
+
+
 # -- S4: manual gap must not produce a false FAILURE ----------------------
 def test_manual_gap_does_not_fail_feedback() -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
