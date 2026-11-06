@@ -169,9 +169,9 @@ S(p) = S_demand(p) + S_gw(p) + S_wait(p) + S_spill(p)
   1. **最小绿优先于抢占**：`state_machine.py` 在 `elapsed < min_green_s` 时直接返回
      `minimum_green_not_met`（`feasible=True`），**即使已到 130s 也不切换**。
      因此 130s 是"尽力保证"，不是绝对硬保证（实际等待可能略超）。
-  2. **P0/P1 冲突**：若"到截止的方向"恰好"下游拥堵"（`blocked_deadline` 非空），
-     返回 `PhaseDecision(None, "p0_p1_conflict", feasible=False)`，**不切换**，由上层上报/仲裁。
-     这不是"伪造相位强行放行"，而是安全优先的显式拒绝。
+  2. **P0/P1 冲突（P1 按方向胜出）**：若"到截止的方向"恰好"下游拥堵"，该方向被
+     硬排除出抢占候选（P1 优先于 P0），**绝不会被放行**；但其余可服务方向照常轮转，
+     路口不会因此冻结。溢流信息经 `demands[phase].downstream_blocked` 暴露给上层。
 
 **P1 —— 下游溢流保护（次高）**
 

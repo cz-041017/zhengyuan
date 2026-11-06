@@ -120,7 +120,6 @@ print("可行：", decision.feasible)
 | `countdown_cancelled` | 倒数期间候选分数回落，取消切换 |
 | `score_not_exceeded` | 无候选项分数超过当前（含滞回） |
 | `no_feasible_candidate` / `no_feasible_successor` | 所有候选被下游拥堵排除 |
-| `p0_p1_conflict` | **P0 与 P1 冲突**：截止方向下游又拥堵 → `feasible=False`，需上报仲裁 |
 | `controller_not_normal` / `unknown_current_phase` | 状态非法（故障/清空/未知相位） |
 | `invalid_phase_start_time` | 相位开始时间晚于当前时间（状态时间戳非法） |
 

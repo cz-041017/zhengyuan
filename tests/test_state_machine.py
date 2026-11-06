@@ -81,18 +81,32 @@ def test_p0_below_threshold_does_not_preempt() -> None:
     assert decision.reason != "p0_wait_preempt"
 
 
-def test_p0_p1_conflict_is_infeasible() -> None:
-    machine = make_machine()
+def test_blocked_deadline_does_not_freeze_other_directions() -> None:
+    # A blocked direction at its deadline must NOT freeze the whole junction:
+    # the serviceable direction at deadline still preempts (P0 fires for it),
+    # while the blocked direction is simply excluded (P1 beats P0 per direction).
+    phases = make_phases()
+    phases["WL"] = SignalPhase(
+        phase_id="WL",
+        movement_ids=frozenset({"west_left"}),
+        min_green_s=10,
+        max_green_s=60,
+        yellow_s=3,
+        all_red_s=1,
+    )
+    machine = PhaseStateMachine(phases, Scorer(ScoreConfig()))
     state = make_state("NS", 0.0)
     demands = {
         "NS": PhaseDemand(),
         "EW": PhaseDemand(oldest_wait_s=200.0, downstream_blocked=True),
+        "WL": PhaseDemand(oldest_wait_s=130.0),
     }
 
     decision = machine.tick(state, 12.0, demands)
 
-    assert decision.feasible is False
-    assert decision.reason == "p0_p1_conflict"
+    assert decision.selected_phase_id == "WL"
+    assert decision.reason == "p0_wait_preempt"
+    assert decision.feasible is True
 
 
 def test_max_green_forces_switch() -> None:
@@ -171,7 +185,7 @@ def test_countdown_cancelled_when_score_drops() -> None:
     assert machine.stage == MachineStage.GREEN
 
 
-def test_p0_p1_conflict_clears_countdown() -> None:
+def test_countdown_cancelled_when_target_becomes_blocked() -> None:
     machine = make_machine()
     state = make_state("NS", 0.0)
     high = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=60.0)}
@@ -180,13 +194,16 @@ def test_p0_p1_conflict_clears_countdown() -> None:
     machine.tick(state, 23.0, high)  # countdown_started
     assert machine.stage == MachineStage.COUNTDOWN
 
-    # A blocked direction whose wait hits the deadline triggers P0/P1 conflict.
+    # EW becomes downstream-blocked (and starved): its spillback penalty
+    # collapses its score, so the pending countdown toward it is cancelled.
     conflict = {
         "NS": PhaseDemand(),
         "EW": PhaseDemand(oldest_wait_s=200.0, downstream_blocked=True),
     }
     decision = machine.tick(state, 30.0, conflict)
-    assert decision.reason == "p0_p1_conflict"
+    assert decision.reason == "countdown_cancelled"
+    assert decision.selected_phase_id is None
+    assert machine.stage == MachineStage.GREEN
 
     # The in-progress countdown must be cleared, not survive the conflict.
     assert machine.stage == MachineStage.GREEN

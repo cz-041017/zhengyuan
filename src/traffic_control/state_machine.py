@@ -198,28 +198,10 @@ class PhaseStateMachine:
             and demands.get(phase_id, PhaseDemand()).oldest_wait_s
             >= deadline - time_to_green
         ]
-        blocked_deadline = [
-            phase_id
-            for phase_id in red_phases
-            if phase_id in blocked
-            and demands.get(phase_id, PhaseDemand()).oldest_wait_s
-            >= deadline - time_to_green
-        ]
-
-        if blocked_deadline:
-            # P0 and P1 conflict: the starving direction cannot be served
-            # without pushing vehicles into a congested downstream link.
-            # Clear any in-progress countdown/debounce: the conflict changed
-            # the feasible set, so a stale pending switch must not survive.
-            self._clear_transient()
-            return PhaseDecision(
-                None,
-                "p0_p1_conflict",
-                scores=scores,
-                constraints_applied=("spillback", "wait_deadline"),
-                feasible=False,
-            )
-
+        # P1 (downstream spillback) beats P0 (wait deadline) per direction: a
+        # blocked direction is already excluded from ``preempt_candidates``, so
+        # it is simply never proposed. The junction keeps cycling the remaining
+        # serviceable directions instead of freezing on a P0/P1 conflict.
         preempt_target = None
         if preempt_candidates:
             preempt_target = max(
