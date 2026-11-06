@@ -42,9 +42,11 @@ def state(phase: str, started: float) -> ControllerState:
 
 # -- S3: pedestrian section is optional -----------------------------------
 def test_pedestrian_section_is_optional() -> None:
-    # panan config has no pedestrian section and must still load.
-    config = load_config("panan/config/panan.yaml")
-    assert "pedestrian" not in config or not config["pedestrian"]
+    # The pedestrian section is optional and must still load when absent.
+    config = load_config(DEFAULT)
+    config.pop("pedestrian", None)
+    validate_config(config)  # must not raise
+    DecisionLayer(config)  # must not raise
 
 
 def test_pedestrian_null_is_tolerated() -> None:
