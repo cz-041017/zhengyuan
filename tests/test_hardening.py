@@ -94,8 +94,9 @@ def test_green_wave_ew_crosswalk_mapping() -> None:
 
 
 # -- M2: active_crosswalks on a normal tick ------------------------------
-def test_active_crosswalks_on_normal_tick() -> None:
+def test_active_crosswalks_on_normal_tick(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
+    boot(layer, now=0.0)
     observations = [
         VehicleObservation(
             track_id=i,

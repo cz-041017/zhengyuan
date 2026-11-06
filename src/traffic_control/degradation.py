@@ -128,6 +128,7 @@ def conservative_oldest_wait(
     last_seen_at: float | None,
     observed_wait_s: float,
     timeout_s: float,
+    max_wait_s: float = 130.0,
 ) -> float:
     """Resolve the wait to feed the scorer and P0 preemption.
 
@@ -136,18 +137,13 @@ def conservative_oldest_wait(
     last observation (or since startup if never observed), so it is still
     served through the P0 budget instead of being silently treated as empty.
 
-    KNOWN LIMITATION, left as documentation deliberately.
-    The never-observed branch returns ``now``, which grows without bound. On a
-    long-running deployment a direction whose sensor never reported therefore
-    looks permanently starving, and if several sensors are dead they all tie at
-    the same wait and preemption churns between them. Probability is low
-    because several simultaneous dead feeds is already a degraded state that
-    ``DegradationController`` reports as PARTIAL/FAILSAFE. Suggested fix when
-    it is worth the contract change: cap the never-observed wait (for example
-    at the deadline), and escalate a never-observed direction once through an
-    alarm instead of re-preempting every tick.
+    The returned wait is capped at ``max_wait_s`` (the P0 deadline, default
+    130 s) so a direction whose sensor never reported — or died long ago —
+    does not grow without bound: it sits at the deadline, is served once
+    through the P0 budget, and the scorer then re-evaluates it like any other
+    waiting direction.
     """
     if last_seen_at is not None and 0 <= now - last_seen_at <= timeout_s:
         return observed_wait_s
     base = last_seen_at if last_seen_at is not None else 0.0
-    return max(observed_wait_s, now - base)
+    return min(max_wait_s, max(observed_wait_s, now - base))

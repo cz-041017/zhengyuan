@@ -238,8 +238,9 @@ def test_pedestrian_null_tolerated() -> None:
 
 
 # -- M1: pedestrian yellow remaining -------------------------------------
-def test_pedestrian_yellow_remaining_window() -> None:
+def test_pedestrian_yellow_remaining_window(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
+    boot(layer, now=0.0)
     obs = [
         VehicleObservation(
             track_id=i, lane_id=lane, observed_at=0.0, speed_mps=0.0

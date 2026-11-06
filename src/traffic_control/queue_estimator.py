@@ -108,7 +108,10 @@ class QueueEstimator:
             )
 
             oldest_wait_s = max(
-                (now - vehicle.first_seen_at for vehicle in vehicles),
+                (
+                    now - vehicle.first_seen_at
+                    for vehicle in waiting_vehicles
+                ),
                 default=0.0,
             )
 

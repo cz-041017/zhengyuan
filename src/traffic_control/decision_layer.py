@@ -174,6 +174,7 @@ class DecisionLayer:
         # Manual override / startup gating.
         self._manual_override = False
         self._startup: StartupSequence | None = None
+        self._booted = False
         self._last_mode: DegradationMode | None = None
 
     @classmethod
@@ -233,6 +234,11 @@ class DecisionLayer:
                 level=AlarmLevel.INFO,
             )
         )
+        self._report_startup(now)
+
+    def _report_startup(self, now: float) -> None:
+        """Emit the STARTUP_SEQUENCE alarm (release and first power-on)."""
+        assert self._startup is not None
         self._sink.report_alarm(
             AlarmEvent(
                 alarm_type=AlarmType.STARTUP_SEQUENCE,
@@ -295,6 +301,15 @@ class DecisionLayer:
             self._feedback.reset()
             return self._silent(now, "manual_override", DegradationMode.NORMAL)
 
+        # 1b) First power-on: run the startup sequence (5 s flash / 10 s
+        # all-red) before any adaptive control, mirroring a control-room
+        # release (GB 25280). Also fires on a process restart.
+        if not self._booted:
+            self._booted = True
+            if self._startup is None:
+                self._startup = StartupSequence(started_at=now)
+                self._report_startup(now)
+
         # 2) Startup sequence in progress (after a release / restart).
         if self._startup is not None:
             stage = self._startup.stage(now)
@@ -349,6 +364,16 @@ class DecisionLayer:
 
         decision = self._machine.tick(state, now, demands)
         feedback = self._feedback.observe(decision, state, now)
+        if feedback is FeedbackStatus.FAILURE:
+            self._sink.report_alarm(
+                AlarmEvent(
+                    alarm_type=AlarmType.FEEDBACK_TIMEOUT,
+                    junction_id=None,
+                    now=now,
+                    level=AlarmLevel.WARNING,
+                    detail={"from_phase": state.current_phase_id},
+                )
+            )
 
         current_phase = self._runtime.phases.get(
             state.current_phase_id or ""
@@ -507,6 +532,7 @@ class DecisionLayer:
                     last_seen.get(phase_id),
                     demand.oldest_wait_s,
                     timeout,
+                    max_wait_s=self._parameters.max_wait_target_s,
                 )
                 demand = PhaseDemand(
                     vehicle_count=demand.vehicle_count,

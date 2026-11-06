@@ -66,8 +66,9 @@ def test_release_enters_startup_sequence_and_recovers() -> None:
     assert after.decision.reason != "failsafe_hold"
 
 
-def test_release_resets_in_memory_state() -> None:
+def test_release_resets_in_memory_state(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
+    boot(layer, now=10.0)
     # Prime the layer with some history.
     from traffic_control.models import VehicleObservation
 
@@ -93,8 +94,9 @@ def test_release_resets_in_memory_state() -> None:
 
 
 # -- data watchdog / failsafe ---------------------------------------------
-def test_failsafe_hands_over_control() -> None:
+def test_failsafe_hands_over_control(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
+    boot(layer, now=100.0)
     # No observation ever arrives -> every feed is dead -> FAILSAFE.
     result = layer.tick(100.0, make_state())
 
@@ -104,9 +106,10 @@ def test_failsafe_hands_over_control() -> None:
     assert result.decision.feasible is False
 
 
-def test_failsafe_alarm_is_emitted_once_per_transition() -> None:
+def test_failsafe_alarm_is_emitted_once_per_transition(boot) -> None:
     sink = CollectingTelemetrySink()
     layer = DecisionLayer.from_yaml(DEFAULT, sink=sink)
+    boot(layer, now=100.0)
 
     layer.tick(100.0, make_state())  # enters FAILSAFE -> one alarm
     layer.tick(101.0, make_state())  # still FAILSAFE -> no new alarm
@@ -131,8 +134,9 @@ def test_takeover_and_release_emit_alarms() -> None:
     assert AlarmType.STARTUP_SEQUENCE in types
 
 
-def test_default_sink_is_noop() -> None:
+def test_default_sink_is_noop(boot) -> None:
     # Constructing without a sink must work and must not require network.
     layer = DecisionLayer.from_yaml(DEFAULT)
+    boot(layer, now=100.0)
     result = layer.tick(100.0, make_state())
     assert result.degradation is DegradationMode.FAILSAFE

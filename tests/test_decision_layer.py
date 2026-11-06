@@ -45,9 +45,10 @@ def test_from_yaml_builds_and_exposes_parameters() -> None:
     }
 
 
-def test_tick_with_no_observations_reports_failsafe() -> None:
+def test_tick_with_no_observations_reports_failsafe(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
     state = make_state("P_N", 0.0)
+    boot(layer, now=5.0)
 
     result = layer.tick(now=5.0, state=state)
 
@@ -57,9 +58,10 @@ def test_tick_with_no_observations_reports_failsafe() -> None:
     assert result.lane_states == {}
 
 
-def test_tick_aggregates_observations_into_phase_demand() -> None:
+def test_tick_aggregates_observations_into_phase_demand(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
     state = make_state("P_N", 0.0)
+    boot(layer, now=5.0)
 
     observations = [
         VehicleObservation(
@@ -81,10 +83,11 @@ def test_tick_aggregates_observations_into_phase_demand() -> None:
     assert result.demands["P_E"].downstream_blocked is False
 
 
-def test_tick_preempts_a_deadline_direction_from_observations() -> None:
+def test_tick_preempts_a_deadline_direction_from_observations(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
     # Elapsed 20 s: past the minimum green, before the maximum green.
     state = make_state("P_N", 100.0)
+    boot(layer, now=130.0)
 
     # All four approaches report, so no direction is "never seen".
     observations = [
@@ -158,9 +161,10 @@ def test_stale_direction_keeps_ageing_and_is_eventually_served() -> None:
     assert result.decision.reason == "p0_wait_preempt"
 
 
-def test_downstream_none_blocks_the_direction() -> None:
+def test_downstream_none_blocks_the_direction(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
     state = make_state("P_N", 0.0)
+    boot(layer, now=20.0)
 
     result = layer.tick(
         now=20.0,
@@ -171,9 +175,10 @@ def test_downstream_none_blocks_the_direction() -> None:
     assert result.downstream_blocked["P_W"] is True
 
 
-def test_downstream_hysteresis_holds_until_released() -> None:
+def test_downstream_hysteresis_holds_until_released(boot) -> None:
     layer = DecisionLayer.from_yaml(DEFAULT)
     state = make_state("P_N", 0.0)
+    boot(layer, now=20.0)
 
     blocked = layer.tick(
         now=20.0, state=state, downstream_occupancy={"west_through": 0.9}
@@ -193,9 +198,10 @@ def test_downstream_hysteresis_holds_until_released() -> None:
     assert released.downstream_blocked["P_W"] is False
 
 
-def test_green_wave_flag_is_passed_through() -> None:
+def test_green_wave_flag_is_passed_through(boot) -> None:
     layer = DecisionLayer.from_yaml(SIMULATION)
     state = make_state("P_MT", 0.0)
+    boot(layer, now=5.0)
 
     result = layer.tick(
         now=5.0, state=state, green_wave_active={"P_MT": True}

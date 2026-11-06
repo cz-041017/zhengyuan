@@ -74,6 +74,11 @@ class DownstreamReport:
     def __post_init__(self) -> None:
         if not self.lane_id.strip():
             raise ValueError("lane_id must not be empty")
+        if self.lane_id not in CANONICAL_LANE_IDS:
+            raise ValueError(
+                f"unknown lane_id {self.lane_id!r}; expected one of "
+                f"{sorted(CANONICAL_LANE_IDS)}"
+            )
         if self.occupancy is not None and not 0 <= self.occupancy <= 1:
             raise ValueError("occupancy must be within [0, 1] or None")
         if self.observed_at < 0:

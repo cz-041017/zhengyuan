@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
 
 from traffic_control.models import (
     ControllerMode,
@@ -24,7 +25,11 @@ class SafetyGuard:
     controller or a substitute for jurisdiction-specific requirements.
     """
 
-    def __init__(self, phases: dict[str, SignalPhase]) -> None:
+    def __init__(
+        self,
+        phases: dict[str, SignalPhase],
+        conflicts: Mapping[str, frozenset[str]] | None = None,
+    ) -> None:
         if not phases:
             raise ValueError("at least one signal phase must be configured")
 
@@ -36,6 +41,10 @@ class SafetyGuard:
                 )
 
         self.phases = dict(phases)
+        self._conflicts: dict[str, frozenset[str]] = {
+            phase_id: frozenset(conflicting)
+            for phase_id, conflicting in (conflicts or {}).items()
+        }
 
     def check_candidate(
         self,
@@ -78,8 +87,14 @@ class SafetyGuard:
                 elif elapsed < current.min_green_s:
                     reasons.append("minimum_green_not_met")
 
-                conflicting_ids = conflicting_phase_ids or set()
-                if candidate_phase_id in conflicting_ids:
+                configured = self._conflicts.get(
+                    state.current_phase_id, frozenset()
+                )
+                explicit = conflicting_phase_ids or set()
+                if (
+                    candidate_phase_id in configured
+                    or candidate_phase_id in explicit
+                ):
                     reasons.append("candidate_conflicts_with_current_phase")
 
         return SafetyCheck(
