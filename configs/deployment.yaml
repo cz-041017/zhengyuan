@@ -57,5 +57,17 @@ logging:
   max_total_bytes: null
   # 黑匣子环形缓冲：保留最近 N 个 tick（2Hz 下 120 ≈ 60s），崩溃时 dump。
   black_box_ticks: 120
-  # 云端上报（Phase 3：MQTT）。当前为 null = 不上传，仅本地落盘。
+  # 云端上报（Phase 3：MQTT）。null = 不上传，仅本地落盘。
+  # 接云端时改为如下结构（broker 地址 / 账号密码待上线前回填）：
+  # cloud:
+  #   type: mqtt
+  #   host: mqtt.example.com      # TODO: MQTT broker 地址
+  #   port: 8883                  # TLS 端口；无 TLS 用 1883
+  #   username: traffic-control   # TODO: 鉴权用户名
+  #   password: ""                # TODO: 鉴权密码（不要入库，用环境变量注入）
+  #   tls: true
+  #   qos: 1
+  #   topic_prefix: traffic-control
+  #   keepalive_s: 60
+  #   max_queue: 10000
   cloud: null

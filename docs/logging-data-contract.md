@@ -110,7 +110,7 @@
 - **Payload**：JSON，每消息一个事件。
 - **鉴权**：用户名 / 密码（config 注入），TLS 可选（端口 8883）。
 - **幂等**：事件含 `tick_id`，后台按 `(junction_id, event_type, tick_id)` 去重。
-- **重试**：本地出站队列 + 断线指数退避重连；长时间断网时队列落盘，恢复后补发。
+- **重试**：有界内存出站队列（默认 10000 条）+ 断线指数退避重连（1–30s）；断线时事件入队、重连后按序补发。事件同时写入本地 JSONL（§6），因此队列满只会丢「云端投递」、绝不丢「审计记录」。
 
 ## 6. 本地落盘策略
 
@@ -131,9 +131,33 @@
 
 ## 8. RL 数据预留
 
-- 快照已按 `(state, action, reward)` 骨架设计：`state` = 决策层输入聚合，`action` = `selected_phase_id`，`reward` = `null` 待回填。
-- 本地 JSONL 逐 tick 全量轨迹即训练集；`config_hash` 用于区分参数版本。
-- 本期**只记录、不开发导出**（用户确认）。导出工具（本地 JSONL → 标准 (s,a,r) 序列）留待 RL 升级时实现。
+快照已按 `(state, action, reward)` 骨架设计，本地 JSONL 逐 tick 全量轨迹即训练集。本期**只记录、不开发导出**（用户确认）；导出工具（本地 JSONL → 标准 (s,a,r) 序列）留待 RL 升级时实现。本节只定义「预留」的边界与语义。
+
+### 8.1 (state, action, reward) 映射
+
+| RL 项 | 快照字段 | 说明 |
+|---|---|---|
+| `state` | `state.*` | 决策层本 tick 的聚合输入：`controller`（当前相位/开始时刻）、`degradation`、`demands`、`lane_states`、`downstream_blocked`、`startup`、`active_crosswalks` |
+| `action` | `action.selected_phase_id` | 决策层提议的下一相位；`reason` / `scores` / `constraints_applied` / `feasible` 是策略可解释性的旁证 |
+| `reward` | `reward` | 恒 `null`，离线回填（见 8.2） |
+| 策略版本 | `config_hash` | 区分「哪套配置产生这条轨迹」 |
+| 轨迹身份 | `(junction_id, boot_id)` | 一次连续运行 = 一条轨迹；`tick_id` 单调递增给出时间序 |
+
+### 8.2 离线 reward 的可计算性
+
+`reward` 不落盘，但**计算 reward 所需的聚合指标已全部落盘**，离线可回填：
+
+- `state.lane_states[*].oldest_wait_s` / `queue_length_m` → 排队延误、队列长度惩罚
+- `state.demands[*].oldest_wait_s` / `vehicle_count` → 相位级等待 / 需求
+- `state.downstream_blocked` → 溢流惩罚
+- `state.controller.current_phase_id` / `phase_started_at` → 绿灯持续时间 / 切换频率
+- `action.selected_phase_id` + `action.feasible` → 动作及是否可行
+
+reward 函数本身（延误 / 停车次数 / 通行量 的加权）是 RL 升级时的设计决策，此处只保证「数据够算、不算丢」。
+
+### 8.3 一个关键语义（未来 RL 开发必读）
+
+`action.selected_phase_id` 是**决策层的提议**，不一定是信号机实际执行的结果。实际相位由 `state.controller.current_phase_id`（`SignalControllerDriver` 的乐观模型）逐 tick 追踪；在 `manual_override` / `failsafe` 时提议会被覆盖。离线训练时以 `state.controller` 的相位流为「真实动作」，`action` 为「策略提议」。
 
 ## 9. 兼容性
 

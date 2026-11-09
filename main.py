@@ -64,6 +64,7 @@ from traffic_control.structured_log import (
     CloudSink,
     JsonlFileSink,
     LoggingPipeline,
+    MqttCloudSink,
     NullCloudSink,
     compute_config_hash,
 )
@@ -227,11 +228,13 @@ def build_link(cfg: Mapping[str, Any]) -> ControllerLink:
 def build_logging(cfg: Mapping[str, Any], config_hash: str) -> LoggingPipeline:
     """按 deployment.yaml 的 logging 段构建日志管线。
 
-    Phase 2 只接本地 JSONL + 黑匣子；云端暂为 NullCloudSink（Phase 3 换 MQTT）。
+    本地 JSONL + 黑匣子始终构建；``logging.cloud`` 为 ``{type: mqtt, ...}`` 时
+    构建 MqttCloudSink（鉴权 + 可选 TLS），否则 NullCloudSink（不上传）。
     """
     log_cfg = cfg.get("logging", {}) or {}
+    directory = str(log_cfg.get("directory", "/var/log/traffic-control"))
     file_sink = JsonlFileSink(
-        log_cfg.get("directory", "/var/log/traffic-control"),
+        directory,
         retention_days=int(log_cfg.get("retention_days", 30)),
         max_bytes_per_file=int(log_cfg.get("max_bytes_per_file", 50 * 1024 * 1024)),
         max_total_bytes=(
@@ -239,8 +242,7 @@ def build_logging(cfg: Mapping[str, Any], config_hash: str) -> LoggingPipeline:
         ),
     )
     black_box = BlackBox(max_ticks=int(log_cfg.get("black_box_ticks", 120)))
-    cloud_sink: CloudSink = NullCloudSink()
-    # TODO(Phase 3): 读 log_cfg["cloud"] 构建 MqttCloudSink（MQTT + 鉴权）。
+    cloud_sink: CloudSink = build_cloud_sink(log_cfg.get("cloud"), str(cfg.get("junction_id", "unknown")))
     return LoggingPipeline(
         junction_id=str(cfg.get("junction_id", "unknown")),
         boot_id=uuid.uuid4().hex,
@@ -248,6 +250,30 @@ def build_logging(cfg: Mapping[str, Any], config_hash: str) -> LoggingPipeline:
         file_sink=file_sink,
         cloud_sink=cloud_sink,
         black_box=black_box,
+        crash_dump_path=Path(directory) / "tick.crash",
+    )
+
+
+def build_cloud_sink(cloud_cfg: Mapping[str, Any] | None, junction_id: str) -> CloudSink:
+    """按 logging.cloud 段构建云端上报（Phase 3：MQTT + 鉴权）。
+
+    cloud 为 null / 非 ``type: mqtt`` 时返回 NullCloudSink（不上传）。
+    """
+    if not cloud_cfg or cloud_cfg.get("type") != "mqtt":
+        return NullCloudSink()
+    username = cloud_cfg.get("username")
+    password = cloud_cfg.get("password")
+    return MqttCloudSink(
+        junction_id,
+        host=str(cloud_cfg["host"]),
+        port=int(cloud_cfg.get("port", 1883)),
+        username=str(username) if username is not None else None,
+        password=str(password) if password is not None else None,
+        tls=bool(cloud_cfg.get("tls", False)),
+        qos=int(cloud_cfg.get("qos", 1)),
+        topic_prefix=str(cloud_cfg.get("topic_prefix", "traffic-control")),
+        max_queue=int(cloud_cfg.get("max_queue", 10000)),
+        keepalive_s=int(cloud_cfg.get("keepalive_s", 60)),
     )
 
 

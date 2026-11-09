@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -54,6 +55,13 @@ def _to_jsonable(obj: Any) -> Any:
     if isinstance(obj, (list, tuple, set, frozenset)):
         return [_to_jsonable(x) for x in obj]
     return obj
+
+
+def _dumps(obj: Any) -> str:
+    """Serialize to compact, deterministic JSON (sorted keys, UTF-8, no ASCII escapes)."""
+    return json.dumps(
+        _to_jsonable(obj), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 def build_tick_snapshot(
@@ -119,9 +127,7 @@ def compute_config_hash(config: Mapping[str, Any]) -> str:
     that differ only in phase timing must not collide. Backend / offline RL uses
     this to bucket trajectories by policy (docs/logging-data-contract.md §3).
     """
-    canonical = json.dumps(
-        _to_jsonable(config), sort_keys=True, separators=(",", ":")
-    )
+    canonical = _dumps(config)
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
@@ -168,7 +174,7 @@ class JsonlFileSink:
         active = self.active_path
         try:
             if active.exists() and active.stat().st_size > 0:
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 active.rename(self._dir / f"{self._prefix}_{stamp}.jsonl")
         except OSError:
             # Best-effort: on rename failure keep appending to the active file.
@@ -176,9 +182,7 @@ class JsonlFileSink:
 
     def write(self, record: Mapping[str, Any]) -> None:
         try:
-            line = json.dumps(
-                record, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            )
+            line = _dumps(record)
         except (TypeError, ValueError) as exc:
             logger.warning("structured_log: failed to serialize record: %s", exc)
             return
@@ -265,12 +269,7 @@ class BlackBox:
         try:
             with open(path, "w", encoding="utf-8") as fh:
                 for snap in self._ring:
-                    fh.write(
-                        json.dumps(
-                            snap, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-                        )
-                        + "\n"
-                    )
+                    fh.write(_dumps(snap) + "\n")
         except OSError as exc:
             logger.warning("structured_log: black box dump failed: %s", exc)
 
@@ -301,6 +300,127 @@ class NullCloudSink(CloudSink):
         pass
 
 
+class MqttCloudSink(CloudSink):
+    """MQTT cloud publisher (docs/logging-data-contract.md §5).
+
+    * Events → ``traffic-control/{junction_id}/event/{event_type}``; alarms →
+      ``traffic-control/{junction_id}/alarm`` (both QoS 1, retain=false).
+    * Username/password auth (config-injected), optional TLS (port 8883).
+    * Bounded outbound queue: while disconnected events are queued and flushed on
+      reconnect; paho handles exponential-backoff reconnect.
+
+    ``paho.mqtt`` is imported lazily so a junction that never uploads does not
+    need the dependency. ``client`` is injectable for tests; when injected no
+    connection is opened, but auth/TLS/reconnect wiring is still applied.
+    Best-effort by contract: network/serialization errors are logged, never
+    raised into the control loop.
+    """
+
+    def __init__(
+        self,
+        junction_id: str,
+        *,
+        host: str,
+        port: int = 1883,
+        username: str | None = None,
+        password: str | None = None,
+        tls: bool = False,
+        qos: int = 1,
+        topic_prefix: str = "traffic-control",
+        max_queue: int = 10000,
+        keepalive_s: int = 60,
+        client_id: str | None = None,
+        client: Any | None = None,
+    ) -> None:
+        self._junction_id = junction_id
+        self._topic_prefix = topic_prefix.rstrip("/")
+        self._qos = qos
+        self._queue: deque[tuple[str, str]] = deque(maxlen=max_queue)
+        self._connected = False
+
+        if client is None:
+            import paho.mqtt.client as mqtt  # lazy: only needed for cloud upload
+
+            client = mqtt.Client(
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+                client_id=client_id or f"traffic-{uuid.uuid4().hex[:8]}",
+                protocol=mqtt.MQTTv311,
+            )
+            if username is not None:
+                client.username_pw_set(username, password)
+            if tls:
+                client.tls_set()
+            client.reconnect_delay_set(min_delay=1, max_delay=30)
+            # connect_async is non-blocking and never raises for an unreachable
+            # broker; the network loop retries in the background with backoff.
+            # This keeps logging best-effort: a down broker must not crash startup.
+            client.connect_async(host, port, keepalive=keepalive_s)
+            client.loop_start()
+        else:
+            # Test double: apply the same wiring so tests can assert config flow.
+            if username is not None:
+                client.username_pw_set(username, password)
+            if tls:
+                client.tls_set()
+            client.reconnect_delay_set(min_delay=1, max_delay=30)
+
+        client.on_connect = self._on_connect
+        client.on_disconnect = self._on_disconnect
+        self._client = client
+
+    def _topic(self, event_type: str) -> str:
+        if event_type == EVENT_ALARM:
+            return f"{self._topic_prefix}/{self._junction_id}/alarm"
+        return f"{self._topic_prefix}/{self._junction_id}/event/{event_type}"
+
+    def _on_connect(self, client: Any, userdata: Any, flags: Any, reason_code: Any, properties: Any) -> None:
+        self._connected = True
+        self.flush()
+
+    def _on_disconnect(self, client: Any, userdata: Any, flags: Any, reason_code: Any, properties: Any) -> None:
+        self._connected = False
+
+    def publish_event(self, event_type: str, payload: Mapping[str, Any]) -> None:
+        topic = self._topic(event_type)
+        try:
+            msg = _dumps(payload)
+        except (TypeError, ValueError) as exc:
+            logger.warning("structured_log: mqtt serialize failed: %s", exc)
+            return
+        if self._connected:
+            info = None
+            try:
+                info = self._client.publish(topic, msg, qos=self._qos)
+            except Exception as exc:  # noqa: BLE001 — best-effort, never raise
+                logger.warning("structured_log: mqtt publish failed: %s", exc)
+            if info is not None and getattr(info, "rc", 0) != 0:
+                # paho returns rc != 0 (e.g. MQTT_ERR_NO_CONN) when the message
+                # was dropped; re-queue it for a later flush.
+                self._queue.append((topic, msg))
+        else:
+            self._queue.append((topic, msg))
+
+    def flush(self) -> None:
+        while self._connected and self._queue:
+            topic, msg = self._queue.popleft()
+            try:
+                self._client.publish(topic, msg, qos=self._qos)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("structured_log: mqtt flush failed: %s", exc)
+                self._queue.appendleft((topic, msg))
+                break
+
+    def close(self) -> None:
+        try:
+            self._client.loop_stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._client.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 class LoggingPipeline:
     """Record every tick locally; publish events to the cloud on change.
 
@@ -317,6 +437,7 @@ class LoggingPipeline:
         file_sink: JsonlFileSink | None = None,
         cloud_sink: CloudSink | None = None,
         black_box: BlackBox | None = None,
+        crash_dump_path: str | Path | None = None,
     ) -> None:
         self._junction_id = junction_id
         self._boot_id = boot_id
@@ -324,6 +445,7 @@ class LoggingPipeline:
         self._file_sink = file_sink
         self._cloud_sink = cloud_sink
         self._black_box = black_box
+        self._crash_dump_path = Path(crash_dump_path) if crash_dump_path else None
         self._tick_id = 0
         self._last_phase: str | None = None
         self._last_degradation: DegradationMode | None = None
@@ -430,22 +552,30 @@ class LoggingPipeline:
         self._last_feedback_failure = result.feedback == FeedbackStatus.FAILURE
 
     def report_alarm(self, event: AlarmEvent) -> None:
+        data = _to_jsonable(event)
+        data["ts_wall"] = data.pop("now")  # uniform envelope: ts_wall, not now
+        data["tick_id"] = self._tick_id
         if self._file_sink is not None:
             self._file_sink.write(
-                {"schema_version": SCHEMA_VERSION, "type": EVENT_ALARM, **_to_jsonable(event)}
+                {"schema_version": SCHEMA_VERSION, "type": EVENT_ALARM, **data}
             )
         if self._cloud_sink is not None:
-            self._cloud_sink.publish_event(EVENT_ALARM, _to_jsonable(event))
+            self._cloud_sink.publish_event(EVENT_ALARM, data)
 
     def report_log(self, event: LogEvent) -> None:
+        data = _to_jsonable(event)
+        data["ts_wall"] = data.pop("now")
+        data["tick_id"] = self._tick_id
         if self._file_sink is not None:
             self._file_sink.write(
-                {"schema_version": SCHEMA_VERSION, "type": EVENT_LOG, **_to_jsonable(event)}
+                {"schema_version": SCHEMA_VERSION, "type": EVENT_LOG, **data}
             )
 
     def publish_event(self, event_type: str, payload: Mapping[str, Any]) -> None:
         """Record and publish a custom event (e.g. ``heartbeat_fault``) from the host loop."""
         data = _to_jsonable(payload)
+        data.setdefault("tick_id", self._tick_id)
+        data.setdefault("ts_wall", time.time())
         if self._file_sink is not None:
             self._file_sink.write(
                 {"schema_version": SCHEMA_VERSION, "type": event_type, **data}
@@ -458,3 +588,5 @@ class LoggingPipeline:
             self._file_sink.close()
         if self._cloud_sink is not None:
             self._cloud_sink.close()
+        if self._black_box is not None and self._crash_dump_path is not None:
+            self._black_box.dump(self._crash_dump_path)
