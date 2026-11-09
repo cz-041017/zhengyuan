@@ -78,6 +78,15 @@ def test_heartbeat_link_lost():
     assert not hb.link_lost
 
 
+def test_heartbeat_misses_counter():
+    hb = Heartbeat(max_missed=3)
+    hb.record(False)
+    hb.record(False)
+    assert hb.misses == 2
+    hb.record(True)
+    assert hb.misses == 0
+
+
 def test_controller_link_request_phase_via_null():
     link = ControllerLink(
         transport=NullTransport(),

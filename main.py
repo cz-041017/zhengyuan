@@ -33,6 +33,7 @@ import logging
 import signal
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -48,6 +49,7 @@ from interface.hikvision.transports import (
     TcpTransport,
     Transport,
 )
+from traffic_control.config_loader import load_config
 from traffic_control.decision_layer import DecisionLayer
 from traffic_control.degradation import DegradationMode
 from traffic_control.models import ControllerMode, ControllerState, VehicleObservation
@@ -57,7 +59,14 @@ from traffic_control.perception import (
     downstream_occupancy,
     normalize_detections,
 )
-from traffic_control.telemetry import NullTelemetrySink
+from traffic_control.structured_log import (
+    BlackBox,
+    CloudSink,
+    JsonlFileSink,
+    LoggingPipeline,
+    NullCloudSink,
+    compute_config_hash,
+)
 
 log = logging.getLogger("traffic_control.main")
 
@@ -213,6 +222,36 @@ def build_link(cfg: Mapping[str, Any]) -> ControllerLink:
 
 
 # --------------------------------------------------------------------------- #
+# 结构化日志管线（docs/logging-data-contract.md）
+# --------------------------------------------------------------------------- #
+def build_logging(cfg: Mapping[str, Any], config_hash: str) -> LoggingPipeline:
+    """按 deployment.yaml 的 logging 段构建日志管线。
+
+    Phase 2 只接本地 JSONL + 黑匣子；云端暂为 NullCloudSink（Phase 3 换 MQTT）。
+    """
+    log_cfg = cfg.get("logging", {}) or {}
+    file_sink = JsonlFileSink(
+        log_cfg.get("directory", "/var/log/traffic-control"),
+        retention_days=int(log_cfg.get("retention_days", 30)),
+        max_bytes_per_file=int(log_cfg.get("max_bytes_per_file", 50 * 1024 * 1024)),
+        max_total_bytes=(
+            int(log_cfg["max_total_bytes"]) if log_cfg.get("max_total_bytes") else None
+        ),
+    )
+    black_box = BlackBox(max_ticks=int(log_cfg.get("black_box_ticks", 120)))
+    cloud_sink: CloudSink = NullCloudSink()
+    # TODO(Phase 3): 读 log_cfg["cloud"] 构建 MqttCloudSink（MQTT + 鉴权）。
+    return LoggingPipeline(
+        junction_id=str(cfg.get("junction_id", "unknown")),
+        boot_id=uuid.uuid4().hex,
+        config_hash=config_hash,
+        file_sink=file_sink,
+        cloud_sink=cloud_sink,
+        black_box=black_box,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # 指挥中心接管 / 摘除（占位：命令文件）
 # --------------------------------------------------------------------------- #
 def check_control_room(
@@ -245,6 +284,7 @@ def run_loop(
     layer: DecisionLayer,
     link: ControllerLink,
     driver: SignalControllerDriver,
+    pipeline: LoggingPipeline,
     perception_path: Path,
     tick_period_s: float,
     heartbeat_interval_s: float,
@@ -261,7 +301,10 @@ def run_loop(
         check_control_room(layer, link, cmd_path, now)
 
         observations, downstream = read_perception(perception_path, now)
-        result = layer.tick(now, driver.state(), observations, downstream)
+        state = driver.state()
+        result = layer.tick(now, state, observations, downstream)
+        # 每 tick 全量落盘；相位切换/降级/告警等变化由管线触发上传。
+        pipeline.on_tick(state, result)
 
         # 启动序列结束后选首绿；决策层不提议「第一个相位」。
         if result.startup is None and driver.current_phase_id is None:
@@ -282,6 +325,14 @@ def run_loop(
             link.poll()
             if link.mode is LinkMode.FAULT:
                 log.error("link fault — signal controller unreachable")
+                pipeline.publish_event(
+                    "heartbeat_fault",
+                    {
+                        "ts_wall": now,
+                        "link_mode": link.mode.value,
+                        "consecutive_misses": link.heartbeat.misses,
+                    },
+                )
 
         ticks += 1
         if max_ticks is not None and ticks >= max_ticks:
@@ -310,8 +361,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     decision_config = args.decision_config or cfg["decision_config"]
 
-    sink = NullTelemetrySink(logger=logging.getLogger("traffic_control.telemetry"))
-    layer = DecisionLayer.from_yaml(decision_config, sink=sink)
+    # 先加载决策配置：config_hash 覆盖完整配置（含相位配时），再据此建日志管线。
+    config = load_config(decision_config)
+    config_hash = compute_config_hash(config)
+    pipeline = build_logging(cfg, config_hash)
+    layer = DecisionLayer(config, sink=pipeline)
 
     link = build_link(cfg["link"])
     link.open()
@@ -341,6 +395,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             layer=layer,
             link=link,
             driver=driver,
+            pipeline=pipeline,
             perception_path=Path(cfg["perception"]["input_path"]),
             tick_period_s=float(cfg["tick_period_s"]),
             heartbeat_interval_s=float(
@@ -357,6 +412,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             link.request_detach()
         finally:
             link.close()
+            pipeline.close()
     return 0
 
 

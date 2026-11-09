@@ -1,4 +1,4 @@
-﻿# Python-generated files
+# Python-generated files
 __pycache__/
 *.py[cod]
 build/
@@ -12,6 +12,7 @@ venv/
 
 # Test and coverage caches
 .pytest_cache/
+pytest-of-*/
 .coverage
 htmlcov/
 
@@ -40,3 +41,7 @@ sumo/results/
 *.log
 routes.rou*.xml
 *.rou.alt.xml
+
+# 本地开发文件（仅保留本地，不入库 / 不部署到 RK3588）
+bench/
+docs/hikvision-integration-requirements.md

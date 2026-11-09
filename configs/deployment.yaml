@@ -7,6 +7,9 @@
 # 决策层配置文件路径（相对仓库根）。
 decision_config: configs/default.yaml
 
+# 路口标识（日志 / 告警 / MQTT topic 都会用）。
+junction_id: panan_1
+
 # 控制回路周期（秒）。2 Hz（0.5s）。感知层按 ≥2Hz 写帧。
 tick_period_s: 0.5
 
@@ -40,3 +43,19 @@ control_room:
 # 启动序列结束后选定的首个绿灯相位（决策层不提议首相位）。
 # 缺省取决策层第一个相位。
 initial_phase: P_N
+
+# 结构化运行日志（docs/logging-data-contract.md）。
+logging:
+  # 本地 JSONL 落盘目录（RK3588 上建议挂到数据分区）。
+  directory: /var/log/traffic-control
+  # 保留天数（2Hz × ~500B ≈ 86MB/天；30 天 ≈ 2.6GB）。
+  retention_days: 30
+  # 单个文件超过该字节数即轮转（50 MB）。
+  max_bytes_per_file: 52428800
+  # 溢出兜底：日志目录总字节数超限时从最旧轮转文件开始删除。
+  # 建议设为日志分区容量的 80%，例如 64GB 分区 → 54975581388。null = 不启用。
+  max_total_bytes: null
+  # 黑匣子环形缓冲：保留最近 N 个 tick（2Hz 下 120 ≈ 60s），崩溃时 dump。
+  black_box_ticks: 120
+  # 云端上报（Phase 3：MQTT）。当前为 null = 不上传，仅本地落盘。
+  cloud: null

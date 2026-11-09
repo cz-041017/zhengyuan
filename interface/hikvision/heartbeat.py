@@ -22,5 +22,10 @@ class Heartbeat:
         """连续无响应达到阈值 → 链路丢失，应摘除交权并报警。"""
         return self._missed >= self.max_missed
 
+    @property
+    def misses(self) -> int:
+        """连续无响应次数（诊断 / 日志用）。"""
+        return self._missed
+
     def reset(self) -> None:
         self._missed = 0
