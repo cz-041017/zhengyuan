@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from traffic_control.decision_layer import LayerResult
@@ -230,9 +231,14 @@ def test_pipeline_report_alarm() -> None:
             detail={"reason": "all feeds dead"},
         )
     )
-    assert sink.events[0][0] == EVENT_ALARM
-    assert sink.events[0][1]["alarm_type"] == "failsafe"
-    assert sink.events[0][1]["detail"] == {"reason": "all feeds dead"}
+    ev = sink.events[0]
+    assert ev[0] == EVENT_ALARM
+    assert ev[1]["alarm_type"] == "failsafe"
+    assert ev[1]["detail"] == {"reason": "all feeds dead"}
+    # Uniform event envelope (docs §4): ts_wall (not `now`) + tick_id.
+    assert ev[1]["ts_wall"] == 10.0
+    assert "now" not in ev[1]
+    assert ev[1]["tick_id"] == 0
 
 
 def test_pipeline_report_log_to_file(tmp_path: Path) -> None:
@@ -263,3 +269,53 @@ def test_pipeline_publish_event_records_locally(tmp_path: Path) -> None:
     record = json.loads((tmp_path / "tick.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert record["type"] == "heartbeat_fault"
     assert record["consecutive_misses"] == 3
+
+
+def test_pipeline_publish_event_adds_envelope() -> None:
+    sink = _RecordingSink()
+    pipe = LoggingPipeline("j1", "boot-1", "h", cloud_sink=sink)
+    pipe.publish_event("heartbeat_fault", {"ts_wall": 1.0, "consecutive_misses": 3})
+    ev = sink.events[0]
+    assert ev[0] == "heartbeat_fault"
+    assert ev[1]["ts_wall"] == 1.0
+    assert ev[1]["tick_id"] == 0
+    assert ev[1]["consecutive_misses"] == 3
+
+
+def test_pipeline_report_log_envelope(tmp_path: Path) -> None:
+    sink = JsonlFileSink(tmp_path)
+    pipe = LoggingPipeline("j1", "boot-1", "h", file_sink=sink)
+    pipe.report_log(LogEvent(now=1.0, message="hello", junction_id="j1"))
+    pipe.close()
+    record = json.loads((tmp_path / "tick.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert record["type"] == "log"
+    assert record["ts_wall"] == 1.0
+    assert "now" not in record
+    assert record["tick_id"] == 0
+
+
+def test_pipeline_close_dumps_black_box(tmp_path: Path) -> None:
+    pipe = LoggingPipeline(
+        "j1",
+        "boot-1",
+        "h",
+        black_box=BlackBox(max_ticks=2),
+        crash_dump_path=tmp_path / "tick.crash",
+    )
+    pipe.on_tick(_controller(), _result(), ts_wall=0.0)
+    pipe.on_tick(_controller(), _result(), ts_wall=1.0)
+    pipe.close()
+    lines = (tmp_path / "tick.crash").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(l)["tick_id"] for l in lines] == [0, 1]
+
+
+def test_jsonl_sink_rotation_filename_format(tmp_path: Path) -> None:
+    sink = JsonlFileSink(tmp_path, max_bytes_per_file=40)
+    for i in range(5):
+        sink.write({"i": i, "pad": "x" * 20})
+    sink.close()
+    rotated = list(tmp_path.glob("tick_*.jsonl"))
+    assert rotated
+    for p in rotated:
+        # Strict spec format (docs §6): tick_YYYYMMDD_HHMMSS.jsonl — no microseconds.
+        assert re.fullmatch(r"tick_\d{8}_\d{6}\.jsonl", p.name), p.name
