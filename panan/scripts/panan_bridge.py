@@ -206,6 +206,9 @@ class JunctionController:
     crossing_time_sum: float = 0.0
     wait_time_sum: float = 0.0
     wait_samples: int = 0
+    green_seconds: float = 0.0
+    green_used_seconds: float = 0.0
+    green_vehicles: int = 0
 
     def apply_tls(self, traci: Any, mode: str, phase_id: str | None) -> None:
         if mode == "all_red":
@@ -492,6 +495,13 @@ class Simulation:
         # 通过时间跟踪
         entry_time: dict[str, dict[str, float]] = {}   # vid -> {junction -> entry}
         prev_junction: dict[str, str | None] = {}
+        veh_stopped_at: dict[str, set[str]] = {}        # vid -> 停过车的路口集合（不停车通过率）
+        prev_speed: dict[str, float] = {}              # vid -> 上一步速度（停车次数检测）
+        veh_stops: dict[str, int] = {}                 # vid -> 累计停车次数
+        total_stops = 0
+        junction_wait_sum = 0.0
+        junction_passes = 0
+        progression_through = 0
 
         # 指标累计：平均车均延误 / 平均排队长度 / 通行能力 / 冲突点数量
         last_time_loss: dict[str, float] = {}   # vid -> 最近一次 timeLoss（到达时取最终延误）
@@ -519,6 +529,8 @@ class Simulation:
                 if vid not in current_ids:
                     total_delay += last_time_loss[vid]
                     delay_count += 1
+                    total_stops += veh_stops.pop(vid, 0)
+                    veh_stopped_at.pop(vid, None)
                     del last_time_loss[vid]
 
             vehicles: dict[str, dict[str, Any]] = {}
@@ -529,6 +541,14 @@ class Simulation:
             p0_violations = 0
             max_wait = 0.0
 
+            # 每步统计绿灯状态（绿灯利用率 / 协调方向不停车通过率）
+            green_junctions: set[str] = set()
+            green_used_junctions: set[str] = set()
+            for _jid, _ctrl in self.controllers.items():
+                if "G" in traci.trafficlight.getRedYellowGreenState(_jid):
+                    green_junctions.add(_jid)
+                    _ctrl.green_seconds += step_length
+
             for vid in veh_ids:
                 if vid not in track_registry:
                     track_registry[vid] = next_track
@@ -537,6 +557,9 @@ class Simulation:
                 speed = traci.vehicle.getSpeed(vid)
                 wt = traci.vehicle.getWaitingTime(vid)
                 last_time_loss[vid] = traci.vehicle.getTimeLoss(vid)
+                if vid in prev_speed and prev_speed[vid] > 0.1 and speed <= 0.1:
+                    veh_stops[vid] = veh_stops.get(vid, 0) + 1
+                prev_speed[vid] = speed
                 if vid not in route_chain:
                     route = list(traci.vehicle.getRoute(vid))
                     route_chain[vid] = {route[i]: route[i + 1] for i in range(len(route) - 1)}
@@ -547,12 +570,17 @@ class Simulation:
                     halting += 1
                     if road in self.netinfo.edge_to_junction:
                         queue_veh += 1
+                        _jid_stop = self.netinfo.edge_to_junction[road]
+                        veh_stopped_at.setdefault(vid, set()).add(_jid_stop)
+                        junction_wait_sum += step_length
                 if wt > max_wait_target:
                     p0_violations += 1
                 max_wait = max(max_wait, wt)
 
                 # 通过/等待 归属到路口（仅在停止线检测区内计为「到达路口」）
                 jid = self.netinfo.edge_to_junction.get(road)
+                if jid in green_junctions:
+                    green_used_junctions.add(jid)
                 pj = prev_junction.get(vid)
                 if pj is not None and pj != jid:
                     # 已驶离路口 pj：记录通过时间（进入检测区 -> 离开进口道）
@@ -561,6 +589,9 @@ class Simulation:
                         t0 = entry_time[vid].pop(pj)
                         ctrl.crossings += 1
                         ctrl.crossing_time_sum += now - t0
+                        junction_passes += 1
+                        if pj not in veh_stopped_at.get(vid, set()):
+                            progression_through += 1
                 if jid is not None:
                     ctrl = self.controllers.get(jid)
                     if ctrl is not None:
@@ -568,10 +599,16 @@ class Simulation:
                         edge_len = self.netinfo.edge_length.get(road, 0.0)
                         dist_to_stop = edge_len - pos
                         if dist_to_stop <= DETECT_DIST_M:
-                            entry_time.setdefault(vid, {}).setdefault(jid, now)
-                            ctrl.wait_time_sum += wt
-                            ctrl.wait_samples += 1
+                            if jid not in entry_time.get(vid, {}):
+                                entry_time.setdefault(vid, {}).setdefault(jid, now)
+                                if jid in green_junctions:
+                                    ctrl.green_vehicles += 1
+                                ctrl.wait_time_sum += wt
+                                ctrl.wait_samples += 1
                 prev_junction[vid] = jid
+
+            for _jid in green_used_junctions:
+                self.controllers[_jid].green_used_seconds += step_length
 
             if self.controller == "adaptive":
                 self._step_adaptive(traci, now, vehicles)
@@ -636,10 +673,19 @@ class Simulation:
 
         # 全网汇总指标（供 CSV 追加）
         duration = rows[-1]["time"] if rows else end_time
+        # 绿灯利用率：绿灯期间通过车辆 / 理论可通行能力（饱和流率×绿灯时长×平均放行车道）
+        green_seconds_total = sum(c.green_seconds for c in self.controllers.values())
+        green_used_total = sum(c.green_used_seconds for c in self.controllers.values())
+
         summary = {
             "arrived": arrived_total,
             "duration_s": duration,
             "avg_delay_s": round(total_delay / delay_count, 3) if delay_count else 0.0,
+            "control_delay_s": round(total_delay / delay_count, 3) if delay_count else 0.0,
+            "stops_per_veh": round(total_stops / delay_count, 3) if delay_count else 0.0,
+            "waiting_per_junction_s": round(junction_wait_sum / junction_passes, 3) if junction_passes else 0.0,
+            "progression_ratio": round(progression_through / junction_passes, 4) if junction_passes else 0.0,
+            "green_utilization": round(green_used_total / green_seconds_total, 4) if green_seconds_total else 0.0,
             "avg_queue_veh": round(queue_sum / total_steps, 3) if total_steps else 0.0,
             "capacity_veh_per_h": round(arrived_total / duration * 3600.0, 2) if duration else 0.0,
             "conflicts": int(conflict_sum),
@@ -700,7 +746,9 @@ def run_simulation(sumocfg, config_path, *, controller="adaptive", fixed_green_s
 METRICS_CSV_HEADER = [
     "timestamp", "controller", "config", "net", "seed",
     "duration_s", "arrived",
-    "avg_delay_s", "avg_queue_veh", "capacity_veh_per_h", "conflicts",
+    "avg_delay_s", "control_delay_s", "stops_per_veh",
+    "waiting_per_junction_s", "progression_ratio", "green_utilization",
+    "avg_queue_veh", "capacity_veh_per_h", "conflicts",
 ]
 
 
@@ -755,6 +803,11 @@ def main() -> None:
         "duration_s": s["duration_s"],
         "arrived": s["arrived"],
         "avg_delay_s": s["avg_delay_s"],
+        "control_delay_s": s["control_delay_s"],
+        "stops_per_veh": s["stops_per_veh"],
+        "waiting_per_junction_s": s["waiting_per_junction_s"],
+        "progression_ratio": s["progression_ratio"],
+        "green_utilization": s["green_utilization"],
         "avg_queue_veh": s["avg_queue_veh"],
         "capacity_veh_per_h": s["capacity_veh_per_h"],
         "conflicts": s["conflicts"],
@@ -777,6 +830,11 @@ def main() -> None:
             "duration_s": s["duration_s"],
             "arrived": s["arrived"],
             "avg_delay_s": s["avg_delay_s"],
+            "control_delay_s": s["control_delay_s"],
+            "stops_per_veh": s["stops_per_veh"],
+            "waiting_per_junction_s": s["waiting_per_junction_s"],
+            "progression_ratio": s["progression_ratio"],
+            "green_utilization": s["green_utilization"],
             "avg_queue_veh": s["avg_queue_veh"],
             "capacity_veh_per_h": s["capacity_veh_per_h"],
             "conflicts": s["conflicts"],
