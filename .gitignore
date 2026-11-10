@@ -52,3 +52,6 @@ traffic-control-handoff/
 # 数据中台（本地调优用，不部署、不上传）
 data_platform/
 tests/test_data_platform.py
+
+# panan 仿真（仅本地调优/汇报，不部署到板子）
+panan/
