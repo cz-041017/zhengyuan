@@ -3,9 +3,9 @@
 > 仓库地址：<https://github.com/cz-041017/zhengyuan>
 > 项目名（pyproject）：`smart-traffic-control`　版本：`0.1.0`
 > 语言 / 版本：Python ≥ 3.11（用 uv 管理依赖）
-> 状态：**逻辑决策层已完整实现**（评分 / 相位分组 / 状态机 / 降级 / 反馈 / 时序分析），155 个单元测试全部通过
+> 状态：**逻辑决策层 + 控制接口层（海康软请求）+ 结构化运行日志已实现**，210 个单元测试全部通过
 >
-> 文档索引：算法设计 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)　·　感知层接口 [`docs/perception-interface.md`](docs/perception-interface.md)　·　可调参数 [`docs/parameter-reference.md`](docs/parameter-reference.md)　·　调试与复现 [`docs/debugging-guide.md`](docs/debugging-guide.md)
+> 文档索引：算法设计 [`docs/decision-algorithm-design.md`](docs/decision-algorithm-design.md)　·　感知层接口 [`docs/perception-interface.md`](docs/perception-interface.md)　·　可调参数 [`docs/parameter-reference.md`](docs/parameter-reference.md)　·　调试与复现 [`docs/debugging-guide.md`](docs/debugging-guide.md)　·　运行日志数据契约 [`docs/logging-data-contract.md`](docs/logging-data-contract.md)　·　海康控制接口 [`interface/hikvision/README.md`](interface/hikvision/README.md)
 
 ---
 
@@ -29,7 +29,7 @@
 
 ## 二、这个"大脑"在整套系统里处在什么位置
 
-一个完整的智能路口系统通常分为四层，**本项目只做其中的"逻辑决策层"（第二层）**：
+一个完整的智能路口系统通常分为四层，**本项目做其中的"逻辑决策层"（第二层）和"控制接口层"（第三层）**：
 
 ```
 ┌───────────────────────────────────────────────────────────┐
@@ -45,7 +45,7 @@
 └──────────────────────────┬────────────────────────────────┘
                            │ 相位建议 PhaseDecision
 ┌──────────────────────────▼────────────────────────────────┐
-│ ③ 控制接口层（Control Interface）—— 传令兵（尚未实现）      │
+│ ③ 控制接口层（Control Interface）—— 传令兵 ◀──── 本项目（软请求）│
 │   把"大脑"的建议翻译成信号机能听懂的通信指令（GB/T 20999 等）。│
 └──────────────────────────┬────────────────────────────────┘
                            │ 控制指令 / 执行反馈
@@ -86,8 +86,8 @@
 - **数据模型**：定义系统里所有"名词"——什么是一辆车、一个车道、一个相位、一条决策。
   相当于先约定好"大家说的'相位'到底指什么"，避免各说各话。
 - **配置加载与校验**：**大部分**可调数字（评分权重、等待上限、阈值、降级开关）写在 YAML 文件里；
-  但**仿真台的部分配时仍是代码里的占位值**（如 `runtime.py` / `panan_bridge.py` 中的
-  `min_green=10 / max_green=60 / yellow=3 / all_red=1`），`configs/*.yaml` 的 `signal.phases` 默认为空。
+  但**仿真台的部分配时仍是代码里的占位值**（`models.py` 的 `SIM_MIN_GREEN_S=12 / SIM_MAX_GREEN_S=30 /
+  SIM_YELLOW_S=3 / SIM_ALL_RED_S=1`），`configs/*.yaml` 的 `signal.phases` 默认为空。
   加载时会**严格检查**（比如"最小绿不能比最大绿还长"），配错了直接报错，不会带病运行。
 
 ### 3.2 排队估计（`queue_estimator.py`）
@@ -165,8 +165,8 @@
 - 1× 超时（默认 3s）无数据 → `PARTIAL`（继续自适应，但等待按保守值算）。
 - 2× 超时（默认 6s）无数据 → `FAILSAFE`：逻辑层**主动交权**（`selected_phase_id=None,
   reason="failsafe_hold"`），由信号机切固定配时/黄闪。
-- 告警通过 `TelemetrySink` 抽象接口上报（默认只写本地日志，**不接网络**；
-  后期由数据接口层转发上云）。
+- 告警通过 `TelemetrySink` 抽象接口上报；`structured_log.LoggingPipeline` 是它的实现——
+  本地 JSONL 落盘 + 可选 MQTT 上云（见 3.14）。
 
 ### 3.13 指挥中心接管（`DecisionLayer.takeover/release`）—— 人接管时逻辑层闭嘴
 - 单路口接管：`layer.takeover(now)` 后该路口**完全静默**（`reason="manual_override"`），
@@ -174,6 +174,17 @@
 - 解除接管：`layer.release(now)` → **内存清零**（不重启进程）+ 走国标启动序列
   （5s 黄闪 + 10s 红灯），序列结束后恢复正常决策。
 - 接管/解除指令协议由交警部门制定；逻辑层只认 `TAKEOVER(junction_id)` / `RELEASE(junction_id)` 两个信号。
+
+### 3.14 结构化运行日志（`structured_log.py`）—— 把每个决策"记下来"
+- **逐 tick 全量快照**：每个决策周期（2 Hz）把「当前状态 + 决策 + 建议相位」写成一行 JSONL
+  （`tick.jsonl`），按 50 MB / 跨天轮转，默认保留 30 天（约 2.6 GB），可配 `max_total_bytes` 兜底防溢出。
+- **黑匣子**：内存环形缓冲保留最近 120 个 tick，异常退出时 `close()` 把快照 dump 到 `.crash` 文件，用于事后还原。
+- **事件流**：只把「值得上传的变化」上报云端——决策切换、降级切换、接管、心跳故障、告警等，
+  走 `LoggingPipeline.publish_event` / `report_alarm`；默认 `cloud: null` 不上传，配 `type: mqtt` 后走
+  MQTT（QoS1 + 用户名密码鉴权 + 可选 TLS，断线本地出站队列 + 指数退避重连）。
+- **RL 预留**：快照骨架按 `(state, action, reward)` 设计，`reward` 恒为 `null` 留待离线回填；
+  `config_hash` 记录决策配置版本，保证轨迹可复现。目前只记录、不开发导出。
+- 详见 [`docs/logging-data-contract.md`](docs/logging-data-contract.md)。
 
 ---
 
@@ -194,7 +205,8 @@
 | [`perception.py`](src/traffic_control/perception.py) | 感知层输入边界 | `RawDetection`、`DownstreamReport`、`PerceptionFrame`、`normalize_detections`、`downstream_occupancy` |
 | [`runtime.py`](src/traffic_control/runtime.py) | 配置 → 运行时端到端装配 | `build_runtime`、`RuntimeObjects`、`build_phases` 等 |
 | [`decision_layer.py`](src/traffic_control/decision_layer.py) | **决策层门面**：一步串起排队→降级→溢流→状态机→反馈，并汇总全部可调参数 | `DecisionLayer`、`TunableParameters`、`LayerResult` |
-| [`telemetry.py`](src/traffic_control/telemetry.py) | 告警/日志输出**抽象接口**（只定义边界，不接网络，后期由数据接口层转发上云） | `TelemetrySink`、`NullTelemetrySink`、`AlarmEvent` |
+| [`telemetry.py`](src/traffic_control/telemetry.py) | 告警/日志事件类型与**抽象接口** | `TelemetrySink`、`NullTelemetrySink`、`CollectingTelemetrySink`、`AlarmEvent`、`LogEvent` |
+| [`structured_log.py`](src/traffic_control/structured_log.py) | 结构化运行日志：逐 tick JSONL 落盘 + 黑匣子 + MQTT 上云 + RL 预留 | `LoggingPipeline`、`JsonlFileSink`、`BlackBox`、`MqttCloudSink`、`compute_config_hash`、`build_tick_snapshot` |
 | [`startup.py`](src/traffic_control/startup.py) | 国标启动序列：5s 黄闪 + 10s 全红 | `StartupSequence`、`StartupStage` |
 
 ---
@@ -203,14 +215,20 @@
 
 ```
 zhengyuan/
+├── main.py                           # 生产入口：2 Hz 决策主循环 + 结构化日志接线
 ├── configs/
 │   ├── default.yaml                 # 模式 A（全支路）示例配置
-│   └── simulation.yaml              # 模式 B（主路 NS + 绿波）示例配置
+│   ├── simulation.yaml              # 模式 B（主路 NS + 绿波）示例配置
+│   └── deployment.yaml              # 部署配置（感知路径 / 海康串口 / MQTT / 日志）
 ├── docs/
 │   ├── decision-algorithm-design.md # 完整算法设计与安全基线（权威）
 │   ├── perception-interface.md      # 感知层（YOLO11）接入接口文档
 │   ├── parameter-reference.md       # 可调参数手册（调参）
-│   └── debugging-guide.md           # 调试与复现手册
+│   ├── debugging-guide.md           # 调试与复现手册
+│   └── logging-data-contract.md     # 运行日志数据契约（schema / 事件 / MQTT / RL）
+├── interface/                        # 控制接口层（软请求 / 相位指示级）
+│   ├── README.md                    # 定位与待办清单
+│   └── hikvision/                   # 海康 XHJ-CW-GA-HK3 信号机接口（protocol/adapter/transports/heartbeat/takeover/controller_link）
 ├── panan/                            # 磐安县真实路网仿真台（演示用）
 │   ├── network/                     # 路网文件（panan.net.xml）
 │   ├── config/                      # 仿真配置（panan.sumocfg / vtypes.add.xml）
@@ -232,12 +250,13 @@ zhengyuan/
 │   ├── perception.py                # 感知层接口边界
 │   ├── runtime.py                   # 配置 → 运行时装配
 │   ├── decision_layer.py            # 决策层门面（一键调用 + 参数汇总）
-│   ├── telemetry.py                 # 告警/日志输出接口（不接网络）
+│   ├── structured_log.py            # 结构化运行日志（JSONL + 黑匣子 + MQTT + RL 预留）
+│   ├── telemetry.py                 # 告警/日志事件类型与抽象接口
 │   └── startup.py                   # 国标 5s 黄闪 + 10s 红灯启动序列
-├── tests/                           # 15 个测试文件 / 154 个用例
+├── tests/                           # 25 个测试文件 / 210 个用例
 ├── .gitignore
 ├── .python-version                  # 3.11
-├── pyproject.toml                   # 依赖：pyyaml；dev：pytest
+├── pyproject.toml                   # 依赖：pyyaml、paho-mqtt；dev：pytest
 ├── uv.lock                          # 依赖锁定
 ├── AGENTS.md                        # 协作代理 / 同事的最小工作规程
 └── README.md
@@ -250,11 +269,12 @@ zhengyuan/
 前置：已安装 [uv](https://docs.astral.sh/uv/)（uv 会自动装 Python 3.11 和依赖）。
 
 ```bash
-git clone https://github.com/cz-041017/zhengyuan.git
+git clone git@github.com:cz-041017/zhengyuan.git   # 或 https://github.com/cz-041017/zhengyuan.git
 cd zhengyuan
 uv sync                                       # 按 uv.lock 创建虚拟环境并安装依赖
-uv run pytest                                 # 期望：155 passed（全部测试通过）
+uv run pytest                                 # 期望：210 passed（全部测试通过）
 uv run smart-traffic-control                  # 入口自检：打印 decision engine ready
+uv run python main.py --max-ticks 3           # 生产入口冒烟：跑 3 个决策周期并写 tick.jsonl
 ```
 
 **用代码跑一次决策**（看它怎么"做决定"）：
@@ -332,8 +352,11 @@ print(decision.selected_phase_id)   # -> P_W（因为 P0 等待保障，触发�
 - [x] 最坏情况时序分析（`timing_analysis.py`）
 - [x] 感知层接口边界与文档（`perception.py`）
 - [x] 配置 → 运行时端到端装配（`runtime.py`）
-- [x] 155 个单元测试 + CLI 入口
+- [x] 210 个单元测试 + CLI 入口
 - [x] 磐安县真实路网仿真台（`panan/`，可视化演示 + 指标统计）
+- [x] 海康 XHJ-CW-GA-HK3 控制接口层（`interface/hikvision/`，软请求/相位指示级：帧编解码/串口/TCP/心跳/接管/链路）
+- [x] 生产入口 `main.py` + 部署配置 `configs/deployment.yaml`（2 Hz 主循环）
+- [x] 结构化运行日志（`structured_log.py`）：逐 tick JSONL 落盘 + 黑匣子 + MQTT 上云 + RL 预留
 
 ### 部分实现 / 未接线（重要，避免误读）
 
@@ -345,13 +368,14 @@ print(decision.selected_phase_id)   # -> P_W（因为 P0 等待保障，触发�
 - [ ] **仿真台的降级/反馈接线**：`panan_bridge.py` 仍直接调 `state_machine.tick()`，
   **未走 `DecisionLayer` 门面**，因此仿真中降级/反馈不生效（属仿真台接线缺口，非决策层缺口）。
 - [ ] **`safety.*` 三个开关**：`config_loader.py` 只校验其布尔类型，**全库无消费者**，当前不产生实际约束力。
-- [ ] **信号配时从配置读取**：仿真台相位配时仍用代码占位值（`runtime.py` / `panan_bridge.py`），
+- [ ] **信号配时从配置读取**：仿真台相位配时仍用代码占位值（`models.py` 的 `SIM_*`），
   未读取 `configs/*.yaml` 的 `signal.phases`（默认为空）。
+- [ ] **海康协议字节级细节**：`interface/hikvision/protocol.py` 的起始符/命令字/CRC/波特率/地址域均为 TBD 占位，
+  需对照海康官方《XHJ-CW-GA-HK3 通信协议》确认后才能真机联调（`phase_mapping.yaml` 相位编号同）。
 
 ### 尚未实现（下一阶段）
 
-- [ ] 控制接口层对接（GB/T 20999 等通信协议）
-- [ ] PLC / 交通信号仿真器执行层接入
+- [ ] 海康信号机真机联调（待协议字节级细节确认 + 交警配合）
 - [ ] 真机标定与最坏情况验证
 
 ---
