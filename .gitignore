@@ -48,3 +48,7 @@ docs/hikvision-integration-requirements.md
 
 # 交接材料（含压测平台与旧 panan 副本，仅本地保留）
 traffic-control-handoff/
+
+# 数据中台（本地调优用，不部署、不上传）
+data_platform/
+tests/test_data_platform.py
