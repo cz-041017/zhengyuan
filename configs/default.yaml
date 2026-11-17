@@ -19,8 +19,8 @@ optimization:
   wait_urgency_max_score: 5.0
   green_wave_score: 2.0
   demand:
-    vehicle_weight: 0.8
-    wait_weight: 0.2
+    vehicle_weight: 0.29
+    wait_weight: 0.71
     n_max: 40.0
   spillback:
     o_high: 0.8
