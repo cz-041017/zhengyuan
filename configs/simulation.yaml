@@ -52,9 +52,6 @@ green_wave:
   band_end_s: 45.0
   period_s: 120.0
 
-countdown:
-  display_duration_s: 15.0
-
 pedestrian:
   # 行人保底：某方向连续红灯达到 max_red_s(150s)，给一次保底绿灯让行人过街
   max_red_s: 150.0

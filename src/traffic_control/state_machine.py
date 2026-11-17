@@ -14,10 +14,10 @@ from traffic_control.scoring import Scorer
 
 
 class MachineStage(str, Enum):
-    """Decision-layer switch lifecycle stage."""
+    """Decision-layer switch lifecycle stage (no countdown: this project cannot
+    render a countdown display, so the optional countdown was removed)."""
 
     GREEN = "green"
-    COUNTDOWN = "countdown"
 
 
 @dataclass(frozen=True)
@@ -26,14 +26,13 @@ class MachineConfig:
 
     score_hysteresis: float = 0.1
     switch_debounce_s: float = 3.0
-    countdown_duration_s: float = 15.0
     # Pedestrian guarantee: a direction whose red has lasted this long gets one
     # minimum green so its crosswalk users can cross. Fixed-time, no detection.
     pedestrian_max_red_s: float = 150.0
     pedestrian_min_green_s: float = 12.0
     # When the current phase has had zero vehicles for this long (after its
     # minimum green), a score-winning successor is taken immediately instead of
-    # waiting through the optional 15 s countdown. All-empty junctions keep the
+    # waiting through a debounce window. All-empty junctions keep the
     # current phase (pedestrian guarantee still applies).
     no_demand_confirm_s: float = 3.0
     # A silence longer than this is a data gap: pedestrian red baselines are
@@ -46,8 +45,6 @@ class MachineConfig:
             raise ValueError("score_hysteresis must be non-negative")
         if self.switch_debounce_s < 0:
             raise ValueError("switch_debounce_s must be non-negative")
-        if self.countdown_duration_s <= 0:
-            raise ValueError("countdown_duration_s must be positive")
         if self.pedestrian_max_red_s <= 0:
             raise ValueError("pedestrian_max_red_s must be positive")
         if self.pedestrian_min_green_s < 0:
@@ -81,11 +78,11 @@ class PhaseStateMachine:
       * enforce minimum green as a hard floor and maximum green as a hard cap;
       * force-schedule a direction whose wait reaches the P0 deadline, where
         the deadline accounts for the current phase's remaining minimum green
-        plus yellow/all-red clearance, bypassing both score and countdown;
+        plus yellow/all-red clearance, bypassing both score and debounce;
       * report an infeasible decision on a P0–P1 conflict (a deadline
         direction whose downstream is congested);
-      * run the 15 s countdown only for score-driven (optional) switches,
-        with per-tick re-verification and cancellation.
+      * switch directly on a score-winning successor after a short debounce
+        (this project has no countdown display, so no countdown stage exists).
     """
 
     def __init__(
@@ -107,8 +104,6 @@ class PhaseStateMachine:
         self._config = config or MachineConfig()
 
         self._last_current_phase: str | None = None
-        self._pending_phase_id: str | None = None
-        self._countdown_started_at: float | None = None
         self._debounce_phase_id: str | None = None
         self._debounce_started_at: float | None = None
         # Pedestrian guarantee bookkeeping.
@@ -119,15 +114,11 @@ class PhaseStateMachine:
 
     @property
     def stage(self) -> MachineStage:
-        return (
-            MachineStage.COUNTDOWN
-            if self._countdown_started_at is not None
-            else MachineStage.GREEN
-        )
+        return MachineStage.GREEN
 
     @property
     def pending_phase_id(self) -> str | None:
-        return self._pending_phase_id
+        return None
 
     def tick(
         self,
@@ -230,7 +221,7 @@ class PhaseStateMachine:
                 feasible=True,
             )
 
-        # P0 deadline preemption: bypass countdown, switch immediately.
+        # P0 deadline preemption: bypass score/debounce, switch immediately.
         if preempt_target is not None:
             self._clear_transient()
             return PhaseDecision(
@@ -260,7 +251,7 @@ class PhaseStateMachine:
 
         # No-demand fast switch: the current phase has carried zero vehicles
         # for ``no_demand_confirm_s`` after its minimum green. If a successor
-        # wins on score, switch now and skip the optional 15 s countdown.
+        # wins on score, switch now (no countdown stage exists).
         # If every direction is empty the scores do not exceed, so the current
         # phase is kept (until the pedestrian guarantee above fires).
         current_vehicle_count = demands.get(
@@ -312,40 +303,6 @@ class PhaseStateMachine:
                 feasible=True,
             )
 
-        # ---- Optional (score-driven) switch with a 15 s countdown. ----
-        if self._countdown_started_at is not None:
-            if not self._score_exceeds(
-                self._pending_phase_id, current, demands
-            ):
-                self._clear_transient()
-                return PhaseDecision(
-                    None, "countdown_cancelled", scores=scores, feasible=True
-                )
-            if (
-                now - self._countdown_started_at
-                >= self._config.countdown_duration_s
-            ):
-                target = self._pending_phase_id
-                self._clear_transient()
-                return PhaseDecision(
-                    target,
-                    "countdown_complete",
-                    scores=scores,
-                    constraints_applied=(
-                        "hysteresis",
-                        "debounce",
-                        "countdown",
-                    ),
-                    feasible=True,
-                )
-            return PhaseDecision(
-                None,
-                "countdown_in_progress",
-                scores=scores,
-                constraints_applied=("countdown",),
-                feasible=True,
-            )
-
         best = self._best_candidate(red_phases, blocked, demands)
         if best is None:
             self._clear_transient()
@@ -384,16 +341,12 @@ class PhaseStateMachine:
                 feasible=True,
             )
 
-        self._debounce_phase_id = None
-        self._debounce_started_at = None
-        self._no_demand_since = None
-        self._pending_phase_id = best
-        self._countdown_started_at = now
+        self._clear_transient()
         return PhaseDecision(
-            None,
-            "countdown_started",
+            best,
+            "score_switch",
             scores=scores,
-            constraints_applied=("hysteresis", "debounce", "countdown"),
+            constraints_applied=("hysteresis", "debounce"),
             feasible=True,
         )
 
@@ -431,7 +384,7 @@ class PhaseStateMachine:
         return candidate_score > current_score + self._config.score_hysteresis
 
     def reset_transient(self) -> None:
-        """Drop an in-progress countdown/debounce without touching history.
+        """Drop an in-progress debounce without touching history.
 
         Used when the layer is silenced (manual takeover): a stale pending
         switch must not survive into the resumed session.
@@ -501,7 +454,5 @@ class PhaseStateMachine:
         return None
 
     def _clear_transient(self) -> None:
-        self._pending_phase_id = None
-        self._countdown_started_at = None
         self._debounce_phase_id = None
         self._debounce_started_at = None

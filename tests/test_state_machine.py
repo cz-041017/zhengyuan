@@ -147,7 +147,8 @@ def test_green_wave_holds_current() -> None:
     assert decision.reason == "score_not_exceeded"
 
 
-def test_score_switch_full_countdown_lifecycle() -> None:
+def test_score_switch_after_debounce() -> None:
+    """Score-winning successor is taken after the debounce; no countdown stage."""
     machine = make_machine()
     state = make_state("NS", 0.0)
     # Current phase carries traffic, so the no-demand fast switch does not fire.
@@ -157,57 +158,12 @@ def test_score_switch_full_countdown_lifecycle() -> None:
     assert decision.reason == "debouncing"
     assert machine.stage == MachineStage.GREEN
 
+    # Debounce (3 s) elapsed -> switch immediately, no countdown.
     decision = machine.tick(state, 23.0, demands)
-    assert decision.reason == "countdown_started"
-    assert machine.stage == MachineStage.COUNTDOWN
-    assert machine.pending_phase_id == "EW"
-
-    decision = machine.tick(state, 30.0, demands)
-    assert decision.reason == "countdown_in_progress"
-
-    decision = machine.tick(state, 38.0, demands)
-    assert decision.reason == "countdown_complete"
+    assert decision.reason == "score_switch"
     assert decision.selected_phase_id == "EW"
     assert machine.stage == MachineStage.GREEN
-
-
-def test_countdown_cancelled_when_score_drops() -> None:
-    machine = make_machine()
-    state = make_state("NS", 0.0)
-    high = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand(oldest_wait_s=60.0)}
-    low = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand()}
-
-    machine.tick(state, 20.0, high)  # debouncing
-    machine.tick(state, 23.0, high)  # countdown_started
-
-    decision = machine.tick(state, 30.0, low)  # score dropped
-
-    assert decision.reason == "countdown_cancelled"
-    assert machine.stage == MachineStage.GREEN
-
-
-def test_countdown_cancelled_when_target_becomes_blocked() -> None:
-    machine = make_machine()
-    state = make_state("NS", 0.0)
-    high = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand(oldest_wait_s=60.0)}
-
-    machine.tick(state, 20.0, high)  # debouncing
-    machine.tick(state, 23.0, high)  # countdown_started
-    assert machine.stage == MachineStage.COUNTDOWN
-
-    # EW becomes downstream-blocked (and starved): its spillback penalty
-    # collapses its score, so the pending countdown toward it is cancelled.
-    conflict = {
-        "NS": PhaseDemand(vehicle_count=1),
-        "EW": PhaseDemand(oldest_wait_s=200.0, downstream_blocked=True),
-    }
-    decision = machine.tick(state, 30.0, conflict)
-    assert decision.reason == "countdown_cancelled"
-    assert decision.selected_phase_id is None
-    assert machine.stage == MachineStage.GREEN
-
-    # The in-progress countdown must be cleared, not survive the conflict.
-    assert machine.stage == MachineStage.GREEN
+    assert machine.pending_phase_id is None
 
 
 def test_current_downstream_blocked_switches_away() -> None:
@@ -245,8 +201,8 @@ def test_unknown_current_phase_is_infeasible() -> None:
 
 
 def test_machine_config_rejects_bad_values() -> None:
-    with pytest.raises(ValueError, match="countdown_duration_s"):
-        MachineConfig(countdown_duration_s=0.0)
+    with pytest.raises(ValueError, match="switch_debounce_s"):
+        MachineConfig(switch_debounce_s=-1.0)
 
 
 def test_phase_demand_rejects_negative_count() -> None:
@@ -254,7 +210,7 @@ def test_phase_demand_rejects_negative_count() -> None:
         PhaseDemand(vehicle_count=-1)
 
 
-def test_no_demand_switch_skips_countdown_after_confirm() -> None:
+def test_no_demand_switch_skips_debounce_after_confirm() -> None:
     """Zero vehicles for 3 s -> take the score-winning successor immediately."""
     machine = make_machine()
     state = make_state("NS", 0.0)
@@ -264,7 +220,7 @@ def test_no_demand_switch_skips_countdown_after_confirm() -> None:
     decision = machine.tick(state, 20.0, demands)
     assert decision.reason != "no_demand_switch"
 
-    # t=23: 3 s of confirmed emptiness -> switch, skipping the 15 s countdown.
+    # t=23: 3 s of confirmed emptiness -> switch immediately.
     decision = machine.tick(state, 23.0, demands)
     assert decision.reason == "no_demand_switch"
     assert decision.selected_phase_id == "EW"

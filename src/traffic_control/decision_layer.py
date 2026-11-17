@@ -359,7 +359,7 @@ class DecisionLayer:
         # Diagnostics (demands / lane_states) are kept so operators can see why.
         if mode is DegradationMode.FAILSAFE:
             self._report_mode_change(now, mode)
-            # Do not carry a stale countdown or pending switch across the gap.
+            # Do not carry stale debounce state across the gap.
             self._machine.reset_transient()
             self._feedback.reset()
             return LayerResult(

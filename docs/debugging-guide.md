@@ -116,8 +116,9 @@ print("可行：", decision.feasible)
 | `minimum_green_not_met` | 当前相位未走完最小绿，不能切换 |
 | `p0_wait_preempt` | **P0 硬抢占**：某方向已到等待截止，直接调度 |
 | `max_green_reached` | 达到最大绿，强制切换 |
-| `debouncing` / `countdown_started` / `countdown_in_progress` / `countdown_complete` | 分数驱动切换的 15s 倒数各阶段 |
-| `countdown_cancelled` | 倒数期间候选分数回落，取消切换 |
+| `debouncing` | 分数驱动切换的去抖确认（3s） |
+| `score_switch` | 去抖完成，直接切换（无倒数） |
+| `no_demand_switch` | 当前相位连续无车 3s，评分压过即切 |
 | `score_not_exceeded` | 无候选项分数超过当前（含滞回） |
 | `no_feasible_candidate` / `no_feasible_successor` | 所有候选被下游拥堵排除 |
 | `controller_not_normal` / `unknown_current_phase` | 状态非法（故障/清空/未知相位） |
@@ -137,8 +138,8 @@ uv run pytest tests/test_state_machine.py::test_p0_preempt_switches_immediately 
 | 想复现的行为 | 命令 | 对应模块 |
 |---|---|---|
 | P0 硬抢占（等待到截止） | `uv run pytest tests/test_state_machine.py -v -k preempt` | `state_machine.py` |
-| 15s 倒数完整生命周期 | `uv run pytest tests/test_state_machine.py -v -k countdown` | `state_machine.py` |
-| 倒数中途取消 | `uv run pytest tests/test_state_machine.py -v -k cancelled` | `state_machine.py` |
+| 去抖后直接切换 | `uv run pytest tests/test_state_machine.py -v -k score_switch` | `state_machine.py` |
+| 无车快速切换 | `uv run pytest tests/test_state_machine.py -v -k no_demand` | `state_machine.py` |
 | P1 下游拥堵排除候选 | `uv run pytest tests/test_state_machine.py -v -k blocked` | `state_machine.py` |
 | P0–P1 冲突判不可行 | `uv run pytest tests/test_state_machine.py -v -k p0_p1` | `state_machine.py` |
 | 最小绿/最大绿边界 | `uv run pytest tests/test_state_machine.py -v` | `state_machine.py` |

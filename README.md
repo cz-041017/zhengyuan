@@ -122,9 +122,8 @@
 ### 3.5 相位状态机（`state_machine.py`）—— 决定"什么时候换灯"
 - **最小绿**：一个相位至少亮这么久，没到时间不许切换（防止"刚绿就红"）。
 - **最大绿**：一个相位最多亮这么久，到时间强制切换（防止某个方向一直霸占绿灯）。
-- **15 秒倒数**：在"可换可不换"的区间里，如果另一个方向分数明显更高，就启动 15 秒倒数，
-  倒数期间还会反复复核（万一有更紧急的情况就取消）。**这只是"可选的换灯"用的**；
-  P0 强制放行和最大绿到点则**跳过倒数直接换**，否则会超时。
+- **去抖确认**：另一个方向分数明显更高时，先观察 3 秒（去抖），仍胜出就直接切换。
+  本项目**不做倒数显示**（SUMO-GUI 无法可靠渲染）；P0 强制放行、最大绿到点、无车快速切换都直接换。
 
 ### 3.6 数据新鲜度与故障降级（`degradation.py`）—— 出问题时的"安全垫"
 - 摄像头数据可能延迟、中断。**数据过期时，绝不能当成"没车"**（那会很危险）。
@@ -198,7 +197,7 @@
 | [`safety.py`](src/traffic_control/safety.py) | 仿真级安全守卫 | `SafetyGuard`、`SafetyCheck` |
 | [`phasing.py`](src/traffic_control/phasing.py) | 相位分组与冲突矩阵 | `PhaseGroup`、`phase_groups`、`ConflictMatrix` |
 | [`scoring.py`](src/traffic_control/scoring.py) | P0–P3 评分与溢流滞回 | `ScoreConfig`、`Scorer`、`SpillbackMonitor`、`aggregate_demand` |
-| [`state_machine.py`](src/traffic_control/state_machine.py) | 相位状态机（最小/最大绿、P0 抢占、15s 倒数） | `PhaseStateMachine`、`MachineConfig`、`PhaseDemand`、`MachineStage` |
+| [`state_machine.py`](src/traffic_control/state_machine.py) | 相位状态机（最小/最大绿、P0 抢占、去抖切换、无车快速切换） | `PhaseStateMachine`、`MachineConfig`、`PhaseDemand`、`MachineStage` |
 | [`degradation.py`](src/traffic_control/degradation.py) | 数据新鲜度与故障降级 | `DataFreshness`、`DegradationController`、`DegradationMode`、`conservative_oldest_wait` |
 | [`feedback.py`](src/traffic_control/feedback.py) | 执行反馈与故障回退（E 状态） | `FeedbackMonitor`、`FeedbackStatus` |
 | [`timing_analysis.py`](src/traffic_control/timing_analysis.py) | 最坏情况时序分析 | `analyze_timing`、`TimingAnalysis` |
@@ -346,7 +345,7 @@ print(decision.selected_phase_id)   # -> P_W（因为 P0 等待保障，触发�
 - [x] 仿真级安全守卫（`safety.py`）
 - [x] 相位分组与冲突矩阵（`phasing.py`）
 - [x] P0–P3 评分引擎与下游溢流滞回（`scoring.py`）
-- [x] 相位状态机：最小/最大绿、P0 截止抢占（最小绿优先）、15s 倒数（`state_machine.py`）
+- [x] 相位状态机：最小/最大绿、P0 截止抢占（最小绿优先）、去抖切换与无车快速切换（`state_machine.py`）
 - [x] 数据新鲜度与故障降级（`degradation.py`）
 - [x] 执行反馈与故障回退（`feedback.py`）
 - [x] 最坏情况时序分析（`timing_analysis.py`）

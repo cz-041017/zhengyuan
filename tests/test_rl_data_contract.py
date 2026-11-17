@@ -32,9 +32,9 @@ def _snapshot() -> dict:
         now=0.0,
         decision=PhaseDecision(
             selected_phase_id="P_E",
-            reason="countdown_complete",
+            reason="score_switch",
             scores={"P_N": 1.2, "P_E": 1.5},
-            constraints_applied=("hysteresis", "countdown"),
+            constraints_applied=("hysteresis", "debounce"),
             feasible=True,
         ),
         degradation=DegradationMode.NORMAL,

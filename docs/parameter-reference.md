@@ -50,7 +50,7 @@
 | `optimization.spillback.o_high` | 0.8 | P1 拥堵进入阈值 | 与感知层占用率口径一致 |
 | `optimization.spillback.o_low` | 0.5 | P1 拥堵解除阈值（滞回） | 必须 < o_high，防止抖动 |
 | `optimization.spillback.penalty` | -1000 | P1 兜底压制分 | 足够大即可，一般不动 |
-| `optimization.score_hysteresis` | 0.1 | 切换滞回 | 防分数抖动，太小会频繁倒数 |
+| `optimization.score_hysteresis` | 0.1 | 切换滞回 | 防分数抖动，太小会频繁切换 |
 | `optimization.switch_debounce_s` | 3.0 | 切换去抖（s） | 越大越稳但越迟钝 |
 | `optimization.priorities` | P0→P1→P2→P3 | 语义优先级顺序（勿动） | 顺序即优先级，改动会被 `config_loader` 拒绝 |
 
@@ -89,12 +89,6 @@
 > （`runtime.build_runtime` 不消费、仿真台硬编码 `green_wave_active=False`）。
 > 因此当前改这些参数**不会让绿波生效**，P2 绿波尚未接入。
 
-## 7. 倒数（`countdown`）
-
-| 参数 | 默认 | 含义 | 调参建议 |
-|---|---|---|---|
-| `countdown.display_duration_s` | 15 | 15s 切换倒数（s） | 参考 GA/T 508 倒计时显示要求；**具体数值需核验标准全文**，不冒充国标规定值 |
-
 ## 7.5 行人保底（`pedestrian`）
 
 | 参数 | 默认 | 含义 | 调参建议 |
@@ -112,7 +106,7 @@
 > 若以后要按实际横道长度自动推导，可在 `runtime.build_machine_config` 里恢复
 > `max(min_green_s, 长度/速度 + 清空)`。
 | `runtime.data_gap_s` | 6 | 数据中断判定（s），超过则重建行人红灯基线 | 应与 `2×observation_timeout_s` 一致；tick 周期更慢时需调大 |
-| `optimization.no_demand_confirm_s` | 3 | 当前相位连续无车多久后允许「快速切换」 | 默认 3s；无车确认后跳过 15s 倒数，直接按评分切给更高分候选 |
+| `optimization.no_demand_confirm_s` | 3 | 当前相位连续无车多久后允许「快速切换」 | 默认 3s；无车确认后直接按评分切给更高分候选 |
 
 **实现边界（重要）**：
 - 本段**可选**（缺省用默认值 150/12/3），旧配置（如 `panan/config/panan.yaml`）无需改。
@@ -265,7 +259,7 @@ p = layer.parameters
 p.max_wait_target_s, p.observation_timeout_s, p.confirm_timeout_s
 p.queue_speed_threshold_mps, p.vehicle_length_m, p.stopped_gap_m, p.stale_after_s
 p.score.green_wave_score, p.score.spillback_penalty, p.score.n_max
-p.machine.countdown_duration_s, p.machine.score_hysteresis
+p.machine.score_hysteresis, p.machine.switch_debounce_s
 ```
 
 相位配时（min/max 绿、黄灯、全红）属审核数据，仍在 `signal.phases`，不在 `TunableParameters` 内。

@@ -36,7 +36,6 @@ def test_from_yaml_builds_and_exposes_parameters() -> None:
     assert params.confirm_timeout_s == 10.0
     assert params.queue_speed_threshold_mps == 0.5
     assert params.score.green_wave_score == 2.0
-    assert params.machine.countdown_duration_s == 15.0
     assert {g.phase_id for g in layer.runtime.phase_groups} == {
         "P_MT",
         "P_ML",

@@ -42,7 +42,6 @@ def validate_config(config: dict[str, Any]) -> None:
         "optimization",
         "signal",
         "green_wave",
-        "countdown",
         "safety",
     )
 
@@ -184,12 +183,6 @@ def validate_config(config: dict[str, Any]) -> None:
         )
 
     _validate_score_ordering(optimization)
-
-    countdown = config["countdown"]
-    _require_positive_number(
-        countdown.get("display_duration_s"),
-        "countdown.display_duration_s",
-    )
 
     # Pedestrian guarantee is optional; defaults match runtime.build_machine_config
     # so older configs (e.g. panan/config/panan.yaml) keep loading.
