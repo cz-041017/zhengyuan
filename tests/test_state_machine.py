@@ -286,3 +286,32 @@ def test_data_gap_resets_trackers() -> None:
     machine.tick(state, 30.0, demands)   # 10 s gap > data_gap_s (6 s), resets
     decision = machine.tick(state, 31.0, demands)  # 1 s after reset -> re-debouncing
     assert decision.reason == "debouncing"
+
+
+def test_green_wave_empty_candidate_may_win() -> None:
+    """A green-wave phase may be released even if it currently has no vehicles."""
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    demands = {
+        "NS": PhaseDemand(),
+        "EW": PhaseDemand(green_wave_active=True),
+    }
+
+    machine.tick(state, 20.0, demands)   # empty -> confirm clock starts
+    decision = machine.tick(state, 23.0, demands)
+    assert decision.reason == "no_demand_switch"
+    assert decision.selected_phase_id == "EW"
+
+
+def test_stale_high_wait_empty_candidate_does_not_win() -> None:
+    """An empty direction that merely has a stale high wait is NOT a target."""
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    demands = {
+        "NS": PhaseDemand(),
+        "EW": PhaseDemand(vehicle_count=0, oldest_wait_s=100.0),
+    }
+
+    for now in (20.0, 23.0, 30.0):
+        decision = machine.tick(state, now, demands)
+        assert decision.reason != "no_demand_switch"

@@ -269,9 +269,20 @@ class PhaseStateMachine:
             >= self._config.no_demand_confirm_s
         ):
             best_empty = self._best_candidate(red_phases, blocked, demands)
+            candidate_demand = (
+                demands.get(best_empty, PhaseDemand())
+                if best_empty is not None
+                else PhaseDemand()
+            )
+            # A successor is a valid no-demand target when it actually carries
+            # vehicles, OR when it wins because the green wave asks for it
+            # (main-road coordination may be empty locally and still be the
+            # right direction to release). A merely stale "high wait" empty
+            # direction is NOT enough.
             if (
                 best_empty is not None
-                and demands.get(best_empty, PhaseDemand()).vehicle_count > 0
+                and (candidate_demand.vehicle_count > 0
+                     or candidate_demand.green_wave_active)
                 and self._score_exceeds(best_empty, current, demands)
             ):
                 self._clear_transient()
