@@ -37,7 +37,7 @@ def test_build_score_config_defaults() -> None:
 def test_build_machine_config_defaults() -> None:
     cfg = build_machine_config(load_config(DEFAULT))
 
-    assert cfg.switch_debounce_s == 3.0
+    assert cfg.switch_debounce_s == 2.0
     assert cfg.score_hysteresis == 0.1
 
 

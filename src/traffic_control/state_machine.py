@@ -18,7 +18,7 @@ class MachineConfig:
     """Switch-gating parameters for the decision state machine."""
 
     score_hysteresis: float = 0.1
-    switch_debounce_s: float = 3.0
+    switch_debounce_s: float = 2.0
     # Pedestrian guarantee: a direction whose red has lasted this long gets one
     # minimum green so its crosswalk users can cross. Fixed-time, no detection.
     pedestrian_max_red_s: float = 150.0
@@ -27,7 +27,7 @@ class MachineConfig:
     # minimum green), a score-winning successor is taken immediately instead of
     # waiting through a debounce window. All-empty junctions keep the
     # current phase (pedestrian guarantee still applies).
-    no_demand_confirm_s: float = 3.0
+    no_demand_confirm_s: float = 1.0
     # A silence longer than this is a data gap: pedestrian red baselines are
     # rebuilt from the recovery instant instead of trusting a possibly
     # multi-switch-distant history.

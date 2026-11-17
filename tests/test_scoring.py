@@ -19,10 +19,10 @@ def test_demand_score_bounds_and_weights() -> None:
     assert scorer.demand_score(0, 0.0) == pytest.approx(0.0)
 
     # Full vehicle queue and full wait saturate to 1.0.
-    assert scorer.demand_score(20, 130.0) == pytest.approx(1.0)
+    assert scorer.demand_score(40, 130.0) == pytest.approx(1.0)
 
     # Half queue (10/20) and half wait (60/120) -> 0.6*0.5 + 0.4*0.5 = 0.5
-    assert scorer.demand_score(10, 65.0) == pytest.approx(0.5)
+    assert scorer.demand_score(20, 65.0) == pytest.approx(0.5)
 
 
 def test_demand_score_clips_above_saturation() -> None:

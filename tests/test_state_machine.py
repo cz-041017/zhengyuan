@@ -156,8 +156,8 @@ def test_score_switch_after_debounce() -> None:
     decision = machine.tick(state, 20.0, demands)
     assert decision.reason == "debouncing"
 
-    # Debounce (3 s) elapsed -> switch immediately, no countdown.
-    decision = machine.tick(state, 23.0, demands)
+    # Debounce (2 s) elapsed -> switch immediately, no countdown.
+    decision = machine.tick(state, 22.0, demands)
     assert decision.reason == "score_switch"
     assert decision.selected_phase_id == "EW"
 
@@ -216,10 +216,11 @@ def test_no_demand_switch_skips_debounce_after_confirm() -> None:
 
     # t=20: first empty tick starts the confirm clock (no switch yet).
     decision = machine.tick(state, 20.0, demands)
-    assert decision.reason != "no_demand_switch"
+    assert decision.reason == "debouncing"
 
-    # t=23: 3 s of confirmed emptiness -> switch immediately.
-    decision = machine.tick(state, 23.0, demands)
+    # t=21: 1 s of confirmed emptiness -> switch BEFORE the 2 s debounce,
+    # proving the no-demand path really skips the score debounce.
+    decision = machine.tick(state, 21.0, demands)
     assert decision.reason == "no_demand_switch"
     assert decision.selected_phase_id == "EW"
 
@@ -298,7 +299,7 @@ def test_green_wave_empty_candidate_may_win() -> None:
     }
 
     machine.tick(state, 20.0, demands)   # empty -> confirm clock starts
-    decision = machine.tick(state, 23.0, demands)
+    decision = machine.tick(state, 21.0, demands)
     assert decision.reason == "no_demand_switch"
     assert decision.selected_phase_id == "EW"
 

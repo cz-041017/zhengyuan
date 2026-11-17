@@ -184,7 +184,7 @@ def validate_config(config: dict[str, Any]) -> None:
 
     _validate_score_ordering(optimization)
 
-    no_demand = optimization.get("no_demand_confirm_s", 3.0)
+    no_demand = optimization.get("no_demand_confirm_s", 1.0)
     _require_non_negative_number(no_demand, "optimization.no_demand_confirm_s")
 
     # Pedestrian guarantee is optional; defaults match runtime.build_machine_config

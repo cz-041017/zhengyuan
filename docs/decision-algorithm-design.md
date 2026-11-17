@@ -216,7 +216,7 @@ S(p) = S_demand(p) + S_gw(p) + S_wait(p) + S_spill(p)
 | 最大绿 `max_green_s` | 相位最长放行时长 | 达到后**强制触发切换**（硬约束） | 防某方向长期霸占绿灯导致其他方向饿死 |
 | 区间（min, max） | 可响应切换区 | `S(candidate) > S(current) + hysteresis` 且持续去抖 → 直接切换 | 让"有更好选择时"可以提前换 |
 
-- `hysteresis = 0.1`、`switch_debounce_s = 3.0`（初值）：避免分数抖动导致频繁切换（频繁切换会损失大量绿灯时间）。
+- `hysteresis = 0.1`、`switch_debounce_s = 2.0`（初值）：避免分数抖动导致频繁切换（频繁切换会损失大量绿灯时间）。
 - 最大绿与 P0 协调：最大绿限制当前相位时长，P0 限制方向等待风险，**二者不能只靠一个 `if` 解决**（见 §8 时序分析）。
 
 ---
@@ -224,12 +224,12 @@ S(p) = S_demand(p) + S_gw(p) + S_wait(p) + S_spill(p)
 ## 5. 切换状态机（A–D，无倒数）
 
 > **本项目无法显示倒数**（SUMO-GUI 无法可靠渲染数字/进度条），因此**不做倒数**：
-> 去掉原 15s 倒数阶段；评分胜出的候选在去抖（3s）后**直接切换**。
+> 去掉原 15s 倒数阶段；评分胜出的候选在去抖（2s）后**直接切换**。
 
 | 状态 | 说明 |
 |---|---|
 | **A 绿灯运行** | 当前相位放行，记录绿灯开始、最小绿/最大绿，持续更新等待风险 |
-| **B 切换请求评估** | 满足之一：①候选分数 > 当前 + hysteresis（去抖）；②达到最大绿；③P0 截止抢占；④当前相位连续无车 3s（且观测可信）、候选有车且分数压过 |
+| **B 切换请求评估** | 满足之一：①候选分数 > 当前 + hysteresis（去抖）；②达到最大绿；③P0 截止抢占；④当前相位连续无车 1s（且观测可信）、候选有车或绿波激活且分数压过 |
 | **C 安全转换** | 直接执行**黄灯（配置值）→ 全红（配置值）**，随后才允许下一合法相位放行 |
 | **D 新相位确认** | 收到可信信号机执行反馈才算切换完成；执行失败进入故障处理流程 |
 
@@ -405,14 +405,14 @@ optimization:
   demand:
     vehicle_weight: 0.6
     wait_weight: 0.4
-    n_max: 20
+    n_max: 40
   spillback:
     o_high: 0.8
     o_low: 0.5
     penalty: -1000.0
   score_hysteresis: 0.1
-  switch_debounce_s: 3.0
-  no_demand_confirm_s: 3.0
+  switch_debounce_s: 2.0
+  no_demand_confirm_s: 1.0
   priorities:
     - wait_time_guarantee                 # P0
     - downstream_spillback_prevention     # P1

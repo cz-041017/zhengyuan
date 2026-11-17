@@ -21,14 +21,14 @@ optimization:
   demand:
     vehicle_weight: 0.6
     wait_weight: 0.4
-    n_max: 20.0
+    n_max: 40.0
   spillback:
     o_high: 0.8
     o_low: 0.5
     penalty: -1000.0
   score_hysteresis: 0.1
-  switch_debounce_s: 3.0
-  no_demand_confirm_s: 3.0      # 当前相位连续无车多久后允许快速切换
+  switch_debounce_s: 2.0
+  no_demand_confirm_s: 1.0      # 当前相位连续无车多久后允许快速切换
   priorities:
     - wait_time_guarantee
     - downstream_spillback_prevention

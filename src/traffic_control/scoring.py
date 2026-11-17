@@ -19,7 +19,7 @@ class ScoreConfig:
     green_wave_score: float = 2.0
     demand_vehicle_weight: float = 0.6
     demand_wait_weight: float = 0.4
-    n_max: float = 20.0
+    n_max: float = 40.0
     spillback_penalty: float = -1000.0
     o_high: float = 0.8
     o_low: float = 0.5

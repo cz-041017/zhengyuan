@@ -46,12 +46,12 @@
 | `optimization.green_wave_score` | 2.0 | P2 绿波加分 | 必须 < `wait_urgency_max_score`，避免绿波淹没 P0 |
 | `optimization.demand.vehicle_weight` | 0.6 | P3 车辆数权重 | 与 wait_weight 之和宜 =1 |
 | `optimization.demand.wait_weight` | 0.4 | P3 等待权重 | 同上 |
-| `optimization.demand.n_max` | 20 | P3 归一化容量（辆） | 按单相位最大可排队长度定，用于把计数压到 [0,1] |
+| `optimization.demand.n_max` | 40 | P3 归一化容量（辆） | 按单相位最大可排队长度定，用于把计数压到 [0,1] |
 | `optimization.spillback.o_high` | 0.8 | P1 拥堵进入阈值 | 与感知层占用率口径一致 |
 | `optimization.spillback.o_low` | 0.5 | P1 拥堵解除阈值（滞回） | 必须 < o_high，防止抖动 |
 | `optimization.spillback.penalty` | -1000 | P1 兜底压制分 | 足够大即可，一般不动 |
 | `optimization.score_hysteresis` | 0.1 | 切换滞回 | 防分数抖动，太小会频繁切换 |
-| `optimization.switch_debounce_s` | 3.0 | 切换去抖（s） | 越大越稳但越迟钝 |
+| `optimization.switch_debounce_s` | 2.0 | 切换去抖（s） | 越大越稳但越迟钝 |
 | `optimization.priorities` | P0→P1→P2→P3 | 语义优先级顺序（勿动） | 顺序即优先级，改动会被 `config_loader` 拒绝 |
 
 ## 5. 相位、配时与冲突表（`signal`）
@@ -106,7 +106,7 @@
 > 若以后要按实际横道长度自动推导，可在 `runtime.build_machine_config` 里恢复
 > `max(min_green_s, 长度/速度 + 清空)`。
 | `runtime.data_gap_s` | 6 | 数据中断判定（s），超过则重建行人红灯基线 | 应与 `2×observation_timeout_s` 一致；tick 周期更慢时需调大 |
-| `optimization.no_demand_confirm_s` | 3 | 当前相位连续无车多久后允许「快速切换」（计入最小绿期间） | 默认 3s；要求当前相位观测可信、目标候选有车且评分压过 |
+| `optimization.no_demand_confirm_s` | 1 | 当前相位连续无车多久后允许「快速切换」（计入最小绿期间） | 默认 1s；要求当前相位观测可信、目标候选有车且评分压过 |
 
 **实现边界（重要）**：
 - 本段**可选**（缺省用默认值 150/12/3），旧配置（如 `panan/config/panan.yaml`）无需改。
