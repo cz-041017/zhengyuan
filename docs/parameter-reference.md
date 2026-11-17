@@ -106,7 +106,7 @@
 > 若以后要按实际横道长度自动推导，可在 `runtime.build_machine_config` 里恢复
 > `max(min_green_s, 长度/速度 + 清空)`。
 | `runtime.data_gap_s` | 6 | 数据中断判定（s），超过则重建行人红灯基线 | 应与 `2×observation_timeout_s` 一致；tick 周期更慢时需调大 |
-| `optimization.no_demand_confirm_s` | 3 | 当前相位连续无车多久后允许「快速切换」 | 默认 3s；无车确认后直接按评分切给更高分候选 |
+| `optimization.no_demand_confirm_s` | 3 | 当前相位连续无车多久后允许「快速切换」（计入最小绿期间） | 默认 3s；要求当前相位观测可信、目标候选有车且评分压过 |
 
 **实现边界（重要）**：
 - 本段**可选**（缺省用默认值 150/12/3），旧配置（如 `panan/config/panan.yaml`）无需改。
@@ -259,7 +259,7 @@ p = layer.parameters
 p.max_wait_target_s, p.observation_timeout_s, p.confirm_timeout_s
 p.queue_speed_threshold_mps, p.vehicle_length_m, p.stopped_gap_m, p.stale_after_s
 p.score.green_wave_score, p.score.spillback_penalty, p.score.n_max
-p.machine.score_hysteresis, p.machine.switch_debounce_s
+p.machine.score_hysteresis, p.machine.switch_debounce_s, p.machine.no_demand_confirm_s
 ```
 
 相位配时（min/max 绿、黄灯、全红）属审核数据，仍在 `signal.phases`，不在 `TunableParameters` 内。

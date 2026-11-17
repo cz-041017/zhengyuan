@@ -28,6 +28,7 @@ optimization:
     penalty: -1000.0
   score_hysteresis: 0.1
   switch_debounce_s: 3.0
+  no_demand_confirm_s: 3.0      # 当前相位连续无车多久后允许快速切换
   priorities:
     - wait_time_guarantee
     - downstream_spillback_prevention

@@ -4,7 +4,6 @@ from traffic_control.models import ControllerMode, ControllerState, SignalPhase
 from traffic_control.scoring import ScoreConfig, Scorer
 from traffic_control.state_machine import (
     MachineConfig,
-    MachineStage,
     PhaseDemand,
     PhaseStateMachine,
 )
@@ -156,14 +155,11 @@ def test_score_switch_after_debounce() -> None:
 
     decision = machine.tick(state, 20.0, demands)
     assert decision.reason == "debouncing"
-    assert machine.stage == MachineStage.GREEN
 
     # Debounce (3 s) elapsed -> switch immediately, no countdown.
     decision = machine.tick(state, 23.0, demands)
     assert decision.reason == "score_switch"
     assert decision.selected_phase_id == "EW"
-    assert machine.stage == MachineStage.GREEN
-    assert machine.pending_phase_id is None
 
 
 def test_current_downstream_blocked_switches_away() -> None:
@@ -214,7 +210,9 @@ def test_no_demand_switch_skips_debounce_after_confirm() -> None:
     """Zero vehicles for 3 s -> take the score-winning successor immediately."""
     machine = make_machine()
     state = make_state("NS", 0.0)
-    demands = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=60.0)}
+    # EW must actually carry a vehicle: a merely "high wait" empty direction
+    # is not a valid no-demand target (all-empty must hold).
+    demands = {"NS": PhaseDemand(), "EW": PhaseDemand(vehicle_count=1, oldest_wait_s=60.0)}
 
     # t=20: first empty tick starts the confirm clock (no switch yet).
     decision = machine.tick(state, 20.0, demands)
@@ -224,7 +222,6 @@ def test_no_demand_switch_skips_debounce_after_confirm() -> None:
     decision = machine.tick(state, 23.0, demands)
     assert decision.reason == "no_demand_switch"
     assert decision.selected_phase_id == "EW"
-    assert machine.stage == MachineStage.GREEN
 
 
 def test_all_directions_empty_keeps_current_phase() -> None:
@@ -248,3 +245,44 @@ def test_no_demand_switch_waits_for_minimum_green() -> None:
     # elapsed 5 s < min green 10 s
     decision = machine.tick(state, 5.0, demands)
     assert decision.reason == "minimum_green_not_met"
+
+
+def test_debounce_resets_when_score_drops() -> None:
+    """Score falling back during debounce cancels the pending switch."""
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    high = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand(vehicle_count=1, oldest_wait_s=60.0)}
+    low = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand()}
+
+    machine.tick(state, 20.0, high)   # debouncing
+    machine.tick(state, 21.0, low)    # score dropped -> debounce cleared
+    decision = machine.tick(state, 22.0, low)
+    assert decision.reason == "score_not_exceeded"
+
+
+def test_debounce_restarts_when_candidate_becomes_blocked() -> None:
+    """If the candidate becomes spillback-blocked, the pending switch is dropped."""
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    high = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand(vehicle_count=1, oldest_wait_s=60.0)}
+    blocked = {
+        "NS": PhaseDemand(vehicle_count=1),
+        "EW": PhaseDemand(vehicle_count=1, oldest_wait_s=200.0, downstream_blocked=True),
+    }
+
+    machine.tick(state, 20.0, high)      # debouncing toward EW
+    decision = machine.tick(state, 25.0, blocked)
+    assert decision.reason != "score_switch"
+    assert decision.selected_phase_id != "EW"
+
+
+def test_data_gap_resets_trackers() -> None:
+    """A perception gap must not let a stale debounce complete."""
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    demands = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand(vehicle_count=1, oldest_wait_s=60.0)}
+
+    machine.tick(state, 20.0, demands)   # debouncing
+    machine.tick(state, 30.0, demands)   # 10 s gap > data_gap_s (6 s), resets
+    decision = machine.tick(state, 31.0, demands)  # 1 s after reset -> re-debouncing
+    assert decision.reason == "debouncing"

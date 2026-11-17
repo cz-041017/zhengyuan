@@ -197,7 +197,7 @@
 | [`safety.py`](src/traffic_control/safety.py) | 仿真级安全守卫 | `SafetyGuard`、`SafetyCheck` |
 | [`phasing.py`](src/traffic_control/phasing.py) | 相位分组与冲突矩阵 | `PhaseGroup`、`phase_groups`、`ConflictMatrix` |
 | [`scoring.py`](src/traffic_control/scoring.py) | P0–P3 评分与溢流滞回 | `ScoreConfig`、`Scorer`、`SpillbackMonitor`、`aggregate_demand` |
-| [`state_machine.py`](src/traffic_control/state_machine.py) | 相位状态机（最小/最大绿、P0 抢占、去抖切换、无车快速切换） | `PhaseStateMachine`、`MachineConfig`、`PhaseDemand`、`MachineStage` |
+| [`state_machine.py`](src/traffic_control/state_machine.py) | 相位状态机（最小/最大绿、P0 抢占、去抖切换、无车快速切换） | `PhaseStateMachine`、`MachineConfig`、`PhaseDemand` |
 | [`degradation.py`](src/traffic_control/degradation.py) | 数据新鲜度与故障降级 | `DataFreshness`、`DegradationController`、`DegradationMode`、`conservative_oldest_wait` |
 | [`feedback.py`](src/traffic_control/feedback.py) | 执行反馈与故障回退（E 状态） | `FeedbackMonitor`、`FeedbackStatus` |
 | [`timing_analysis.py`](src/traffic_control/timing_analysis.py) | 最坏情况时序分析 | `analyze_timing`、`TimingAnalysis` |

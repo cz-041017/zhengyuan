@@ -118,7 +118,7 @@ print("可行：", decision.feasible)
 | `max_green_reached` | 达到最大绿，强制切换 |
 | `debouncing` | 分数驱动切换的去抖确认（3s） |
 | `score_switch` | 去抖完成，直接切换（无倒数） |
-| `no_demand_switch` | 当前相位连续无车 3s，评分压过即切 |
+| `no_demand_switch` | 当前相位连续无车 3s（含最小绿期间）+ 观测可信 + 候选有车且评分压过 |
 | `score_not_exceeded` | 无候选项分数超过当前（含滞回） |
 | `no_feasible_candidate` / `no_feasible_successor` | 所有候选被下游拥堵排除 |
 | `controller_not_normal` / `unknown_current_phase` | 状态非法（故障/清空/未知相位） |

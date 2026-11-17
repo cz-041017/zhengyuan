@@ -13,13 +13,6 @@ from traffic_control.models import (
 from traffic_control.scoring import Scorer
 
 
-class MachineStage(str, Enum):
-    """Decision-layer switch lifecycle stage (no countdown: this project cannot
-    render a countdown display, so the optional countdown was removed)."""
-
-    GREEN = "green"
-
-
 @dataclass(frozen=True)
 class MachineConfig:
     """Switch-gating parameters for the decision state machine."""
@@ -63,6 +56,10 @@ class PhaseDemand:
     oldest_wait_s: float = 0.0
     downstream_blocked: bool = False
     green_wave_active: bool = False
+    # False when the underlying feed is stale/dead: the fields above are a
+    # conservative guess, not a live observation. The no-demand fast switch
+    # must never fire on untrusted data.
+    trusted: bool = True
 
     def __post_init__(self) -> None:
         if self.vehicle_count < 0:
@@ -111,14 +108,7 @@ class PhaseStateMachine:
         self._last_green_end: dict[str, float] = {}
         self._last_tick_at: float | None = None
         self._no_demand_since: float | None = None
-
-    @property
-    def stage(self) -> MachineStage:
-        return MachineStage.GREEN
-
-    @property
-    def pending_phase_id(self) -> str | None:
-        return None
+        self._last_phase_started_at: float | None = None
 
     def tick(
         self,
@@ -127,21 +117,31 @@ class PhaseStateMachine:
         demands: Mapping[str, PhaseDemand],
     ) -> PhaseDecision:
         if state.mode == ControllerMode.MANUAL_OVERRIDE:
-            self._clear_transient()
+            self._reset_tracking()
             return PhaseDecision(None, "manual_override", feasible=True)
         if state.mode != ControllerMode.NORMAL:
+            self._reset_tracking()
             return PhaseDecision(None, "controller_not_normal", feasible=False)
 
         if (
             state.current_phase_id is None
             or state.current_phase_id not in self._phases
         ):
+            self._reset_tracking()
             return PhaseDecision(None, "unknown_current_phase", feasible=False)
 
         current = self._phases[state.current_phase_id]
         elapsed = now - state.phase_started_at
         if elapsed < 0:
+            self._reset_tracking()
             return PhaseDecision(None, "invalid_phase_start_time", feasible=False)
+
+        current_demand = demands.get(current.phase_id, PhaseDemand())
+        if current_demand.vehicle_count == 0 and current_demand.trusted:
+            if self._no_demand_since is None:
+                self._no_demand_since = now
+        else:
+            self._no_demand_since = None
 
         if self._started_at is None:
             self._started_at = now
@@ -154,7 +154,16 @@ class PhaseStateMachine:
             # so a stale baseline can never fire the guarantee early.
             self._last_green_end.clear()
             self._started_at = now
+            self._reset_tracking()
         self._last_tick_at = now
+        if (
+            self._last_phase_started_at is not None
+            and state.phase_started_at != self._last_phase_started_at
+        ):
+            # Same phase id restarted (or a switch we did not observe):
+            # the no-demand clock must not survive across a green start.
+            self._reset_tracking()
+        self._last_phase_started_at = state.phase_started_at
         if self._last_current_phase != state.current_phase_id:
             if self._last_current_phase is not None:
                 # The previous green ended when the *new* phase started, not
@@ -250,31 +259,34 @@ class PhaseStateMachine:
             )
 
         # No-demand fast switch: the current phase has carried zero vehicles
-        # for ``no_demand_confirm_s`` after its minimum green. If a successor
-        # wins on score, switch now (no countdown stage exists).
-        # If every direction is empty the scores do not exceed, so the current
-        # phase is kept (until the pedestrian guarantee above fires).
-        current_vehicle_count = demands.get(
-            current.phase_id, PhaseDemand()
-        ).vehicle_count
-        if current_vehicle_count == 0:
-            if self._no_demand_since is None:
-                self._no_demand_since = now
-            elif now - self._no_demand_since >= self._config.no_demand_confirm_s:
-                best_empty = self._best_candidate(red_phases, blocked, demands)
-                if best_empty is not None and self._score_exceeds(
-                    best_empty, current, demands
-                ):
-                    self._clear_transient()
-                    return PhaseDecision(
-                        best_empty,
-                        "no_demand_switch",
-                        scores=scores,
-                        constraints_applied=("min_green", "no_demand_confirm"),
-                        feasible=True,
-                    )
-        else:
-            self._no_demand_since = None
+        # for ``no_demand_confirm_s`` (counted across its minimum green too).
+        # A successor must (a) actually carry vehicles, (b) win on score.
+        # Otherwise the current phase is kept — "all directions empty" holds
+        # the green until the pedestrian guarantee above fires.
+        if (
+            self._no_demand_since is not None
+            and now - self._no_demand_since
+            >= self._config.no_demand_confirm_s
+        ):
+            best_empty = self._best_candidate(red_phases, blocked, demands)
+            if (
+                best_empty is not None
+                and demands.get(best_empty, PhaseDemand()).vehicle_count > 0
+                and self._score_exceeds(best_empty, current, demands)
+            ):
+                self._clear_transient()
+                self._no_demand_since = None
+                return PhaseDecision(
+                    best_empty,
+                    "no_demand_switch",
+                    scores=scores,
+                    constraints_applied=(
+                        "min_green",
+                        "hysteresis",
+                        "no_demand_confirm",
+                    ),
+                    feasible=True,
+                )
 
         # Maximum green is a hard cap: terminate the current phase.
         if elapsed >= current.max_green_s:
@@ -390,6 +402,12 @@ class PhaseStateMachine:
         switch must not survive into the resumed session.
         """
         self._clear_transient()
+        self._no_demand_since = None
+
+    def _reset_tracking(self) -> None:
+        """Drop debounce and no-demand trackers (phase change / gap / fault)."""
+        self._clear_transient()
+        self._no_demand_since = None
 
     def _red_duration(self, phase_id: str, now: float) -> float:
         """How long ``phase_id`` has been red (since its last green ended).

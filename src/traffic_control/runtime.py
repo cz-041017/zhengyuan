@@ -46,6 +46,7 @@ def build_machine_config(config: dict[str, Any]) -> MachineConfig:
     return MachineConfig(
         score_hysteresis=optimization["score_hysteresis"],
         switch_debounce_s=optimization["switch_debounce_s"],
+        no_demand_confirm_s=optimization.get("no_demand_confirm_s", 3.0),
         pedestrian_max_red_s=pedestrian.get("max_red_s", 150.0),
         pedestrian_min_green_s=float(pedestrian.get("min_green_s", 12.0)),
         data_gap_s=config.get("runtime", {}).get("data_gap_s", 6.0),
