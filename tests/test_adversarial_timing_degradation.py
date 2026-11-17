@@ -1,8 +1,9 @@
 """回归测试：配时可追溯性与 P0 结构性保证（漏洞3/5，已修复）。
 
-- 漏洞5：仿真占位配时原为 max_green=60 → cycle=256s、worst_wait=196s>130s，
-  P0 130s 保证结构上依赖抢占。修复=占位配时统一用 SIM_MAX_GREEN_S=30，
-  worst_wait=3*30+16=106<130，保证变为结构性（preempt_required 为空）。
+- 漏洞5：仿真占位配时曾为 max_green=60 → cycle=256s、worst_wait=196s>130s，
+  P0 130s 保证结构上依赖抢占。SIM_MAX_GREEN_S 现为 80s：4 相位 worst_wait =
+  4*(80+4)-80 = 256s > 130s，P0 必然依赖抢占。要恢复"结构性保证"，必须给
+  signal.phases 配差异化 max_green（例如主路 80s + 支路 20~30s）。
 - 漏洞3：conservative_oldest_wait 的 never-observed 分支曾无界返回 now；
   修复后按 max_wait_s（默认 130）封顶。
 """
@@ -41,13 +42,20 @@ def _sim_placeholder_phases() -> dict[str, SignalPhase]:
     }
 
 
-def test_sim_placeholder_timing_is_not_preempt_load_bearing() -> None:
-    """占位配时不得让 P0 130s 保证退化为"纯靠抢占"。"""
+def test_sim_placeholder_timing_under_80s_relies_on_preemption() -> None:
+    """80s 占位配时下，4 相位 worst_wait 超过 130s，P0 必然依赖抢占。
+
+    这是 SIM_MAX_GREEN_S=80 的既定取舍：用更长的单相位绿灯换效率，
+    代价是其他方向的最坏等待超过 130s，由 P0 硬抢占兜底。
+    """
     analysis = analyze_timing(_sim_placeholder_phases(), max_wait_target_s=130.0)
 
-    assert analysis.preempt_required == frozenset()
-    assert "preempt_load_bearing" not in analysis.reasons
-    assert analysis.worst_wait_s["P_N"] < 130.0
+    # 4 * (80 + 4) - 80 = 256 > 130 -> 每个相位都需要 P0 兜底
+    assert analysis.worst_wait_s["P_N"] == 256.0
+    assert analysis.preempt_required == frozenset(
+        {"P_N", "P_E", "P_S", "P_W"}
+    )
+    assert "preempt_load_bearing" in analysis.reasons
 
 
 def test_never_observed_wait_is_bounded() -> None:

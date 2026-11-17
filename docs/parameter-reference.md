@@ -74,6 +74,11 @@
 > `green_wave.enabled=true` 时 `main_through_phase` 必填。
 >
 > 提示：`deployment` 模式要求 `signal.phases` **非空且完整**；`simulation` 模式可留空（构建器用占位配时）。
+
+> **仿真占位配时**（`signal.phases` 为空时由 `runtime.build_phases` 使用，`models.py` 常量）：
+> `min_green=12s` / `max_green=80s` / `yellow=3s` / `all_red=1s`。
+> 4 相位下最坏等待 = `4*(80+4)-80 = 256s > 130s`，**P0 130s 依赖抢占兜底**；
+> 要让 130s 成为结构性保证，必须填 `signal.phases` 做差异化配时（如主路 80s + 支路 20~30s）。
 > 跑 [`timing_analysis.py`](../src/traffic_control/timing_analysis.py) 看「无抢占最坏等待」，若远超 130s 说明 max 绿配得太长。
 
 ## 6. 绿波（`green_wave`，P2）
