@@ -31,6 +31,11 @@ class MachineConfig:
     # minimum green so its crosswalk users can cross. Fixed-time, no detection.
     pedestrian_max_red_s: float = 150.0
     pedestrian_min_green_s: float = 12.0
+    # When the current phase has had zero vehicles for this long (after its
+    # minimum green), a score-winning successor is taken immediately instead of
+    # waiting through the optional 15 s countdown. All-empty junctions keep the
+    # current phase (pedestrian guarantee still applies).
+    no_demand_confirm_s: float = 3.0
     # A silence longer than this is a data gap: pedestrian red baselines are
     # rebuilt from the recovery instant instead of trusting a possibly
     # multi-switch-distant history.
@@ -47,6 +52,8 @@ class MachineConfig:
             raise ValueError("pedestrian_max_red_s must be positive")
         if self.pedestrian_min_green_s < 0:
             raise ValueError("pedestrian_min_green_s must be non-negative")
+        if self.no_demand_confirm_s < 0:
+            raise ValueError("no_demand_confirm_s must be non-negative")
         if self.data_gap_s <= 0:
             raise ValueError("data_gap_s must be positive")
 
@@ -108,6 +115,7 @@ class PhaseStateMachine:
         self._started_at: float | None = None
         self._last_green_end: dict[str, float] = {}
         self._last_tick_at: float | None = None
+        self._no_demand_since: float | None = None
 
     @property
     def stage(self) -> MachineStage:
@@ -250,6 +258,33 @@ class PhaseStateMachine:
                 feasible=True,
             )
 
+        # No-demand fast switch: the current phase has carried zero vehicles
+        # for ``no_demand_confirm_s`` after its minimum green. If a successor
+        # wins on score, switch now and skip the optional 15 s countdown.
+        # If every direction is empty the scores do not exceed, so the current
+        # phase is kept (until the pedestrian guarantee above fires).
+        current_vehicle_count = demands.get(
+            current.phase_id, PhaseDemand()
+        ).vehicle_count
+        if current_vehicle_count == 0:
+            if self._no_demand_since is None:
+                self._no_demand_since = now
+            elif now - self._no_demand_since >= self._config.no_demand_confirm_s:
+                best_empty = self._best_candidate(red_phases, blocked, demands)
+                if best_empty is not None and self._score_exceeds(
+                    best_empty, current, demands
+                ):
+                    self._clear_transient()
+                    return PhaseDecision(
+                        best_empty,
+                        "no_demand_switch",
+                        scores=scores,
+                        constraints_applied=("min_green", "no_demand_confirm"),
+                        feasible=True,
+                    )
+        else:
+            self._no_demand_since = None
+
         # Maximum green is a hard cap: terminate the current phase.
         if elapsed >= current.max_green_s:
             successor = self._best_candidate(red_phases, blocked, demands)
@@ -351,6 +386,7 @@ class PhaseStateMachine:
 
         self._debounce_phase_id = None
         self._debounce_started_at = None
+        self._no_demand_since = None
         self._pending_phase_id = best
         self._countdown_started_at = now
         return PhaseDecision(

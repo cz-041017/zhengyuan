@@ -112,6 +112,7 @@
 > 若以后要按实际横道长度自动推导，可在 `runtime.build_machine_config` 里恢复
 > `max(min_green_s, 长度/速度 + 清空)`。
 | `runtime.data_gap_s` | 6 | 数据中断判定（s），超过则重建行人红灯基线 | 应与 `2×observation_timeout_s` 一致；tick 周期更慢时需调大 |
+| `optimization.no_demand_confirm_s` | 3 | 当前相位连续无车多久后允许「快速切换」 | 默认 3s；无车确认后跳过 15s 倒数，直接按评分切给更高分候选 |
 
 **实现边界（重要）**：
 - 本段**可选**（缺省用默认值 150/12/3），旧配置（如 `panan/config/panan.yaml`）无需改。

@@ -97,7 +97,7 @@ def test_blocked_deadline_does_not_freeze_other_directions() -> None:
     machine = PhaseStateMachine(phases, Scorer(ScoreConfig()))
     state = make_state("NS", 0.0)
     demands = {
-        "NS": PhaseDemand(),
+        "NS": PhaseDemand(vehicle_count=1),
         "EW": PhaseDemand(oldest_wait_s=200.0, downstream_blocked=True),
         "WL": PhaseDemand(oldest_wait_s=130.0),
     }
@@ -150,7 +150,8 @@ def test_green_wave_holds_current() -> None:
 def test_score_switch_full_countdown_lifecycle() -> None:
     machine = make_machine()
     state = make_state("NS", 0.0)
-    demands = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=60.0)}
+    # Current phase carries traffic, so the no-demand fast switch does not fire.
+    demands = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand(oldest_wait_s=60.0)}
 
     decision = machine.tick(state, 20.0, demands)
     assert decision.reason == "debouncing"
@@ -173,8 +174,8 @@ def test_score_switch_full_countdown_lifecycle() -> None:
 def test_countdown_cancelled_when_score_drops() -> None:
     machine = make_machine()
     state = make_state("NS", 0.0)
-    high = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=60.0)}
-    low = {"NS": PhaseDemand(), "EW": PhaseDemand()}
+    high = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand(oldest_wait_s=60.0)}
+    low = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand()}
 
     machine.tick(state, 20.0, high)  # debouncing
     machine.tick(state, 23.0, high)  # countdown_started
@@ -188,7 +189,7 @@ def test_countdown_cancelled_when_score_drops() -> None:
 def test_countdown_cancelled_when_target_becomes_blocked() -> None:
     machine = make_machine()
     state = make_state("NS", 0.0)
-    high = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=60.0)}
+    high = {"NS": PhaseDemand(vehicle_count=1), "EW": PhaseDemand(oldest_wait_s=60.0)}
 
     machine.tick(state, 20.0, high)  # debouncing
     machine.tick(state, 23.0, high)  # countdown_started
@@ -197,7 +198,7 @@ def test_countdown_cancelled_when_target_becomes_blocked() -> None:
     # EW becomes downstream-blocked (and starved): its spillback penalty
     # collapses its score, so the pending countdown toward it is cancelled.
     conflict = {
-        "NS": PhaseDemand(),
+        "NS": PhaseDemand(vehicle_count=1),
         "EW": PhaseDemand(oldest_wait_s=200.0, downstream_blocked=True),
     }
     decision = machine.tick(state, 30.0, conflict)
@@ -251,3 +252,43 @@ def test_machine_config_rejects_bad_values() -> None:
 def test_phase_demand_rejects_negative_count() -> None:
     with pytest.raises(ValueError, match="vehicle_count"):
         PhaseDemand(vehicle_count=-1)
+
+
+def test_no_demand_switch_skips_countdown_after_confirm() -> None:
+    """Zero vehicles for 3 s -> take the score-winning successor immediately."""
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    demands = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=60.0)}
+
+    # t=20: first empty tick starts the confirm clock (no switch yet).
+    decision = machine.tick(state, 20.0, demands)
+    assert decision.reason != "no_demand_switch"
+
+    # t=23: 3 s of confirmed emptiness -> switch, skipping the 15 s countdown.
+    decision = machine.tick(state, 23.0, demands)
+    assert decision.reason == "no_demand_switch"
+    assert decision.selected_phase_id == "EW"
+    assert machine.stage == MachineStage.GREEN
+
+
+def test_all_directions_empty_keeps_current_phase() -> None:
+    """Every direction empty -> scores do not exceed -> hold current phase."""
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    demands = {"NS": PhaseDemand(), "EW": PhaseDemand()}
+
+    for now in (20.0, 23.0, 30.0):
+        decision = machine.tick(state, now, demands)
+        assert decision.reason != "no_demand_switch"
+        assert decision.selected_phase_id is None
+
+
+def test_no_demand_switch_waits_for_minimum_green() -> None:
+    """The fast switch never bypasses the minimum green."""
+    machine = make_machine()
+    state = make_state("NS", 0.0)
+    demands = {"NS": PhaseDemand(), "EW": PhaseDemand(oldest_wait_s=60.0)}
+
+    # elapsed 5 s < min green 10 s
+    decision = machine.tick(state, 5.0, demands)
+    assert decision.reason == "minimum_green_not_met"
