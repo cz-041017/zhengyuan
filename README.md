@@ -1,5 +1,6 @@
-# 正源智能交通信号控制系统 · 逻辑决策层
+# 征远智能交通信号控制系统 · 逻辑决策层
 
+> 署名：**征远科技（杭州）**
 > 仓库地址：<https://github.com/cz-041017/zhengyuan>
 > 项目名（pyproject）：`smart-traffic-control`　版本：`0.1.0`
 > 语言 / 版本：Python ≥ 3.11（用 uv 管理依赖）

@@ -1,5 +1,6 @@
 # 调试与复现手册（含一键仿真教程）
 
+> 署名：**征远科技（杭州）**
 > 面向：本项目的开发者 / 联调同事 / 演示人员。
 > 目标：**从零复现环境 → 跑通决策层 → 复现各类算法行为 → 一键开启仿真演示 → 排查常见故障**。
 > 相关文档：算法设计 [`decision-algorithm-design.md`](decision-algorithm-design.md)　·　可调参数 [`parameter-reference.md`](parameter-reference.md)　·　感知层接口 [`perception-interface.md`](perception-interface.md)
@@ -364,3 +365,4 @@ git push origin main
 - **控制接口层**（GB/T 20999）与 **PLC / 仿真器接入**尚未实现，`PhaseDecision` 暂不落到真实设备。
 - `configs/simulation.yaml` 里的 `simulation:` 段（`duration_s` / `step_s` / `random_seed`）是**给未来仿真台预留**的字段；
   当前磐安县仿真台由 `panan/scripts/panan_bridge.py` 驱动，参数见第 5.4 节与[参数手册](parameter-reference.md)。
+

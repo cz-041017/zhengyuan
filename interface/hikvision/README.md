@@ -1,5 +1,7 @@
 # Hikvision XHJ-CW-GA-HK3 控制接口层
 
+> 署名：**征远科技（杭州）**
+
 RK3588 边缘机 ↔ 海康 XHJ-CW-GA-HK3 智能交通信号机的控制接口（**软请求**）。
 
 ## 通信方式
@@ -95,3 +97,4 @@ FAILSAFE（感知断流）时请求**全红**并告警；心跳 `poll()`；收�
 - [ ] 配时对齐（见 `timing_alignment.md`）。
 - [ ] 状态响应帧结构（当前相位 / 灯色 / 故障码）。
 - [ ] TCP 帧缓冲切帧（生产用，见 `transports.TcpTransport` 的 TODO）。
+

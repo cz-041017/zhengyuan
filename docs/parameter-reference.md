@@ -1,5 +1,6 @@
 # 决策层可调参数参考（调参手册）
 
+> 署名：**征远科技（杭州）**
 > 代码里一次取全：`DecisionLayer.from_yaml(path).parameters` 返回 `TunableParameters`
 > （含 `max_wait_target_s`、`observation_timeout_s`、`score.*` 等分组字段）。
 
@@ -268,3 +269,4 @@ p.machine.score_hysteresis, p.machine.switch_debounce_s, p.machine.no_demand_con
 ```
 
 相位配时（min/max 绿、黄灯、全红）属审核数据，仍在 `signal.phases`，不在 `TunableParameters` 内。
+
